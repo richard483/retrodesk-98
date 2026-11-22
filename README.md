@@ -15,6 +15,7 @@ open http://localhost:8098
 | `DATA_DIR`     | `./data`  | games, saves, BIOS, emulator mirror, `library.json` |
 | `EMU_PASSWORD` | (none)    | if set, the server requires HTTP Basic auth (any username) |
 | `EJS_VERSION`  | `4.2.3`   | EmulatorJS release to mirror |
+| `TST_URL`      | `https://tabstationtoo.github.io/TabStationToo/` | where the PS2 emulator (TabStationToo) is copied from |
 
 ### Docker
 
@@ -42,6 +43,7 @@ docker run -d --name retrodesk98 -p 8098:8098 -v retrodesk-data:/data --restart 
 | Piece | Source |
 |---|---|
 | Emulator cores and player | [EmulatorJS](https://emulatorjs.org) (libretro cores compiled to WebAssembly). The server downloads each file from the EmulatorJS CDN **once**, then serves it from `data/ejs/`. |
+| PS2 emulator | [TabStationToo](https://github.com/TabStationToo/TabStationToo) (PCSX2 compiled to WebAssembly, GPL-3.0). The server copies one build of its site into `data/tst/<build>/` and serves it from there. |
 | Win98 look | [98.css](https://jdan.github.io/98.css/), vendored in `public/vendor/98css` (MIT) |
 | Console detection, library, save sync, browser storage manager, Win98 desktop shell | written for this project |
 
@@ -56,7 +58,7 @@ but it is much heavier (Python, MariaDB, Redis) and has no per-game control over
 | PlayStation 1 | ✅ | pcsx_rearmed (BIOS optional, recommended) |
 | PSP | ✅ (needs WebGL2 + cross-origin isolation, which the server provides) | PPSSPP |
 | Sega MS/GG/Genesis/32X/CD/Saturn, PC Engine, NGP, WonderSwan, Atari 2600/7800/Lynx/Jaguar, 3DO, Arcade | ✅ | various |
-| PlayStation 2 | ❌ stored only | No mature browser emulator yet (Play! has an experimental WASM build) |
+| PlayStation 2 | ⚠️ experimental (desktop Chrome/Edge, BIOS required) | TabStationToo (PCSX2). See [PlayStation 2](#playstation-2) |
 | GameCube / Wii | ❌ stored only | Dolphin has only unreleased WebAssembly demos |
 | PS Vita | ❌ stored only | Vita3K has no browser build |
 
@@ -70,8 +72,8 @@ multi-GB ISOs go straight to disk. A `.cue` uploaded with its `.bin` tracks is b
 
 **Detection** (`lib/detect.js`) reads only a few KB of each file:
 cartridge headers (iNES, N64 in all 3 byte orders, GB/GBA/NDS logos, SEGA header, SNES checksum), ISO-9660
-contents (`SYSTEM.CNF` with `BOOT2` → PS2, with `BOOT` → PS1, `UMD_DATA.BIN` → PSP, raw 2352-byte BIN supported),
-GameCube/Wii disc magic, CSO/RVZ/GCZ/WBFS magic, PBP EBOOT (PS1 classic vs PSP), and the contents of zip files
+contents, also inside CSO/ZSO compressed images (`SYSTEM.CNF` with `BOOT2` → PS2, with `BOOT` → PS1, `UMD_DATA.BIN` → PSP, raw 2352-byte BIN supported),
+CHD metadata (DVD → PS2), GameCube/Wii disc magic, RVZ/GCZ/WBFS magic, PBP EBOOT (PS1 classic vs PSP), and the contents of zip files
 (VPK → Vita). If nothing matches, it falls back to the file extension. Uncertain matches are marked `(?)`, and you can
 change the console from the right-click menu.
 
@@ -88,6 +90,49 @@ size, lets you delete each one, and can request *persistent* storage so the brow
 **Saves.** Battery saves (SRAM) upload every 30 s, on exit and on tab close. Save states (slots 1–9,
 with screenshots) are stored on the server. When you close a game window an auto-save state is written,
 and the next launch offers to resume from it.
+
+## PlayStation 2
+
+PS2 games run on [TabStationToo](https://github.com/TabStationToo/TabStationToo), which is PCSX2 compiled to
+WebAssembly. It is early and experimental, but games play.
+
+**What you need**
+- A **PS2 BIOS** dumped from your own console (one 4 MB `.bin`, any region). Upload it in **BIOS Files**.
+- **Desktop Chrome or Edge**. Firefox works too. A fast CPU helps: heavy scenes run below full speed on slower machines.
+  With WebGPU the hardware renderer is used; without it (Linux usually, or older browsers) the picture is drawn in
+  software, which is slower. Phones and tablets are not supported yet: the emulator reserves 512 MB of memory at start,
+  and it has no touch controls.
+- Disc images: `.iso`, single-track `.bin` (a `.cue` with one `.bin` is stored as the `.bin`), `.chd`, `.cso`, `.zso`.
+  Multi-track BIN/CUE and CHDs with a parent are not supported by TabStationToo yet.
+
+**How it works in RetroDesk**
+- The first time you play a PS2 game, the server copies the TabStationToo site (about 17 MB) from GitHub Pages into
+  `data/tst/<build>/`. After that, nothing is fetched from the internet. The browser caches those files like the other cores.
+- The disc is **never loaded into memory**. TabStationToo reads the parts the game asks for, so *Play without keeping*
+  streams them from your server, and *Download & Play* reads them from the browser's cache.
+- The game window shows only the picture. **View → Show emulator panel** brings back TabStationToo's own interface:
+  TV, console, remote, graphics menu, memory card slots, and the drawn controllers where you remap keys and buttons.
+  **Game → Controls / remap buttons…** opens it at the controllers.
+- **Save states** use RetroDesk's slots 1–9 and the auto-save, stored on the server like other consoles, with
+  resume on the next launch.
+- **Memory cards**: if a browser has none, RetroDesk creates *Memory card 1* in slot 1, because a PS2 game cannot
+  save without a card. The cards are backed up to the server (gzip, usually a few hundred KB) every 30 s and when the
+  game closes. A browser that has not seen the latest copy takes it before the game starts. If both changed, the
+  browser's copy is kept on the server as `data/saves/_ps2/cards-conflict-<time>.bin` and the server's copy wins.
+- **Updates**: TabStationToo changes often. **View → Check for emulator update…** in a PS2 game window downloads
+  the newest build beside the old one and switches over.
+- Game titles come from PCSX2's database (shipped with TabStationToo), looked up by the disc's serial.
+
+**What RetroDesk changes.** Nothing in TabStationToo's files. When `index.html` is served, two lines are added: a
+stylesheet (`public/tst-embed.css`) and a class switch for the compact view. Source and licence:
+[github.com/TabStationToo/TabStationToo](https://github.com/TabStationToo/TabStationToo) (GPL-3.0). It is built on
+[PCSX2](https://github.com/PCSX2/pcsx2). Neither project is affiliated with RetroDesk.
+
+**Why TabStationToo and not Play!.js.** [Play!](https://github.com/jpd002/Play-) has an official browser build
+([playjs.purei.org](https://playjs.purei.org/)) that needs no BIOS. Its own site says it is "not meant to play all
+games", and it has no URL or API for loading a disc from another page. TabStationToo runs PCSX2's core, with
+WebAssembly JITs for all four PS2 processors, a WebGPU renderer, and many games at or near full speed. It can boot a
+BIOS and disc by URL, which is what makes it possible to embed it.
 
 ## Game controllers
 
@@ -112,6 +157,8 @@ connected before the game started. EmulatorJS on its own ignores those, so Retro
 To change who is which player, open **Game → Controls / remap buttons…** and pick a controller per player.
 Each player has their own mapping, and the whole set is saved per console on the server. How many players a
 game allows depends on the console and the game (for example N64 supports 4, NES and SNES 2).
+
+PS2 games have 2 players (ports 1 and 2, no multitap). Assign pads in the emulator panel.
 
 **Online netplay: not available yet.** EmulatorJS 4.2.3 (the current stable release) ships its netplay
 switched off. It is only reachable in debug mode behind an experimental flag. When tested here, even with
@@ -162,10 +209,13 @@ How to install on each platform:
 ```
 server.js            HTTP server, API, EmulatorJS mirror (zero dependencies)
 lib/platforms.js     console table: core, BIOS, extensions, playability
-lib/detect.js        console auto-detection
+lib/detect.js        console auto-detection (also looks inside CSO/ZSO, reads CHD metadata)
+lib/tst.js           TabStationToo (PS2) mirror: download, pin, update, serve
 public/              Win98 frontend (vanilla JS, no build step)
   app.js             desktop, windows, library, upload, play dialog, storage/BIOS managers
   play.html/js       emulator page (runs inside a game window), save sync
+  ps2.html/js        PS2 page: hosts TabStationToo, state slots, memory card sync
+  tst-embed.css      compact game-window layout for TabStationToo
   store.js, sw.js    browser storage + service worker
   gamepad.js         controller polling for desktop navigation
   manifest.webmanifest, icons/   installable app (PWA) metadata and icons

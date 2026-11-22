@@ -79,3 +79,42 @@ test('zip and vpk', async () => {
   await check('game.vpk', zip([['eboot.bin', Buffer.alloc(10)], ['sce_sys/param.sfo', Buffer.alloc(10)]]), 'psvita');
   await check('weird.zip', zip([['weird.gba', Buffer.alloc(10)]]), 'gba');
 });
+
+// Compressed ISOs (CSO: deflate, ZSO: LZ4) hold PSP and PS2 games: the ISO inside decides.
+function compressed(isoBuf, magic, block = 2048) {
+  const n = Math.ceil(isoBuf.length / block);
+  const lz4Literal = (b) => { // valid LZ4 block made only of literals
+    const out = [Math.min(b.length, 15) << 4];
+    if (b.length >= 15) { let rest = b.length - 15; while (rest >= 255) { out.push(255); rest -= 255; } out.push(rest); }
+    return Buffer.concat([Buffer.from(out), b]);
+  };
+  const blocks = [];
+  for (let i = 0; i < n; i++) {
+    const raw = isoBuf.subarray(i * block, (i + 1) * block);
+    blocks.push(magic === 'CISO' ? deflateRawSync(raw) : lz4Literal(raw));
+  }
+  const header = Buffer.alloc(24); header.write(magic, 0); header.writeUInt32LE(24, 4); header.writeBigUInt64LE(BigInt(isoBuf.length), 8); header.writeUInt32LE(block, 16); header[20] = 1;
+  const idx = Buffer.alloc((n + 1) * 4);
+  let pos = 24 + idx.length;
+  blocks.forEach((b, i) => { idx.writeUInt32LE(pos, i * 4); pos += b.length; });
+  idx.writeUInt32LE(pos, n * 4);
+  return Buffer.concat([header, idx, ...blocks]);
+}
+
+test('compressed discs', async () => {
+  const ps2 = iso({ 'SYSTEM.CNF': Buffer.from('BOOT2 = cdrom0:\\SLUS_209.46;1\r\n') }, 'PLAYSTATION');
+  const psp = iso({ 'UMD_DATA.BIN': Buffer.from('ULUS-10041|0001|G') }, 'PSP GAME');
+  assert.equal((await check('ps2.cso', compressed(ps2, 'CISO'), 'ps2')).serial, 'SLUS_209.46');
+  await check('psp.cso', compressed(psp, 'CISO'), 'psp');
+  await check('ps2.zso', compressed(ps2, 'ZISO'), 'ps2');
+  await check('psp.zso', compressed(psp, 'ZISO'), 'psp');
+  // CHD: the metadata says CD or DVD
+  const chd = (tag, logical) => {
+    const h = Buffer.alloc(0x80); h.write('MComprHD', 0); h.writeUInt32BE(124, 8); h.writeUInt32BE(5, 12);
+    h.writeBigUInt64BE(BigInt(logical), 0x20); h.writeBigUInt64BE(0x7cn, 0x30); // metadata right after the header
+    const m = Buffer.alloc(16); m.write(tag, 0); return Buffer.concat([h.subarray(0, 0x7c), m, Buffer.alloc(64)]);
+  };
+  await check('big.chd', chd('DVD ', 4.2e9), 'ps2');
+  const cd = await check('cd.chd', chd('CHT2', 6e8), 'psx');
+  assert.ok(cd.guessed);
+});

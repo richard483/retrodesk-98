@@ -55,6 +55,11 @@ export async function download(url, { cacheName, onProgress, signal } = {}) {
   }));
   const headers = new Headers({ 'Content-Type': res.headers.get('content-type') || 'application/octet-stream' });
   if (total) headers.set('Content-Length', total);
+  // Keep the isolation headers: a worker script served from the cache without COEP is blocked
+  // in a cross-origin isolated page (the PS2 emulator's threads load pcsx2-wasm.js this way).
+  for (const h of ['Cross-Origin-Embedder-Policy', 'Cross-Origin-Opener-Policy', 'Cross-Origin-Resource-Policy']) {
+    const v = res.headers.get(h); if (v) headers.set(h, v);
+  }
   if (cacheName) {
     const c = await caches.open(cacheName);
     await c.put(abs(url), new Response(counted, { headers }));

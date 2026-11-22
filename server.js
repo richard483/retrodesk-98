@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLATFORMS, RUNTIME_FILES, coreFiles } from './lib/platforms.js';
 import { detectFile } from './lib/detect.js';
+import { createTstMirror } from './lib/tst.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 8098);
@@ -20,7 +21,8 @@ const EJS_VERSION = process.env.EJS_VERSION || '4.2.3';
 const EJS_CDN = `https://cdn.emulatorjs.org/${EJS_VERSION}/data/`;
 const PASSWORD = process.env.EMU_PASSWORD || '';
 const PUBLIC = path.join(ROOT, 'public');
-const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), incoming: path.join(DATA, 'incoming') };
+const TST_URL = (process.env.TST_URL || 'https://tabstationtoo.github.io/TabStationToo/').replace(/\/?$/, '/');
+const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), tst: path.join(DATA, 'tst'), incoming: path.join(DATA, 'incoming') };
 for (const d of Object.values(DIRS)) await mkdir(d, { recursive: true });
 
 // ---------------- tiny JSON database ----------------
@@ -36,7 +38,7 @@ function saveDb() {
 }
 
 // ---------------- helpers ----------------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.zip': 'application/zip', '.data': 'application/octet-stream' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.zip': 'application/zip', '.data': 'application/octet-stream', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8', '.tsv': 'text/tab-separated-values; charset=utf-8' };
 const send = (res, code, body, type = 'application/json') => {
   const data = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   res.writeHead(code, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(data), 'Cache-Control': 'no-store' });
@@ -103,6 +105,9 @@ async function ejsSize(rel) {
   try { return (await stat(await ensureEjs(rel))).size; } catch (e) { console.warn('[mirror]', e.message); return null; }
 }
 
+// ---------------- TabStationToo (PS2) mirror ----------------
+const tst = await createTstMirror({ dir: DIRS.tst, source: TST_URL });
+
 // ---------------- library ----------------
 function gameView(g) {
   const p = PLATFORMS[g.platform] || PLATFORMS.unknown;
@@ -144,8 +149,11 @@ async function addGame(srcPath, name, detectPath = srcPath, detectName = name) {
   const dest = path.join(dir, name);
   await rename(srcPath, dest);
   const { size } = await stat(dest);
+  // PS2 volume ids are rarely readable ("SLUS_20946"): use PCSX2's title database, else the file name.
+  const title = det.platform === 'ps2' ? (await tst.title(det.serial)) || titleFromName(name)
+    : det.title && det.title.length > 2 ? det.title : titleFromName(name);
   const g = {
-    id, file: name, size, platform: det.platform, title: det.title && det.title.length > 2 ? det.title : titleFromName(name),
+    id, file: name, size, platform: det.platform, title,
     serial: det.serial || null, detection: det.how, guessed: !!det.guessed, added: Date.now(), lastPlayed: null, playTime: 0,
   };
   db.games[id] = g;
@@ -162,6 +170,13 @@ async function finalizeBatch(batch) {
     const refs = [...text.matchAll(/FILE\s+"?([^"\r\n]+?)"?\s+(BINARY|MOTOROLA|WAVE|MP3|AIFF)/gi)].map((m) => path.basename(m[1]));
     const present = refs.filter((r) => names.includes(r));
     if (!present.length) continue;
+    // PS2 (TabStationToo) reads a single-track .bin directly and cannot read zips: keep the .bin alone.
+    if (present.length === 1 && (await detectFile(path.join(dir, present[0]), present[0]).catch(() => ({}))).platform === 'ps2') {
+      const g = await addGame(path.join(dir, present[0]), present[0]);
+      g.title = titleFromName(cue);
+      added.push(g); used.add(cue); used.add(present[0]);
+      continue;
+    }
     const zipName = cue.replace(/\.cue$/i, '.zip');
     const tmp = path.join(dir, '.bundle-' + randomUUID() + '.zip');
     await zipStore([cue, ...present].map((n) => ({ name: n, path: path.join(dir, n) })), tmp);
@@ -207,17 +222,56 @@ async function handle(req, res) {
     return serveFile(req, res, local, { cache: 'public, max-age=31536000, immutable' });
   }
 
+  // TabStationToo (PS2), one pinned deploy per build id
+  if ((m = p.match(/^\/tst\/([0-9a-f]{6,64})\/(.*)$/))) {
+    const [, build, rel] = m;
+    if (rel.includes('..')) return fail(res, 400, 'bad path');
+    if (rel === '' || rel === 'index.html') {
+      await tst.file(build, 'index.html'); // 404 for an old build
+      return send(res, 200, await tst.indexHtml(build), 'text/html; charset=utf-8');
+    }
+    return serveFile(req, res, await tst.file(build, rel), { cache: 'public, max-age=31536000, immutable' });
+  }
+  if (p === '/api/ps2/emulator' && M === 'GET') return send(res, 200, url.searchParams.has('check') ? await tst.check() : tst.info());
+  if (p === '/api/ps2/emulator/update' && M === 'POST') return send(res, 200, await tst.install());
+
+  // PS2 memory cards: the browser's whole card library (TabStationToo keeps it in IndexedDB),
+  // packed by the client into one blob. The previous copy is kept as cards.bak.
+  if (p === '/api/ps2/cards') {
+    const dir = path.join(DIRS.saves, '_ps2'), file = path.join(dir, 'cards.bin');
+    if (M === 'GET') {
+      if (!existsSync(file)) return fail(res, 404, 'No memory cards on the server yet');
+      return serveFile(req, res, file, { cache: 'no-store' });
+    }
+    if (M === 'PUT') {
+      const data = await readBody(req, 256 << 20);
+      await mkdir(dir, { recursive: true });
+      // A browser whose cards changed while the server's did too keeps its copy here, untouched.
+      if (url.searchParams.has('conflict')) { await writeFile(path.join(dir, `cards-conflict-${Date.now()}.bin`), data); return send(res, 200, { kept: true }); }
+      if (existsSync(file)) await rename(file, path.join(dir, 'cards.bak'));
+      await writeFile(file + '.tmp', data); await rename(file + '.tmp', file);
+      db.ps2Cards = { version: +url.searchParams.get('version') || Date.now(), size: data.length, updated: Date.now() }; await saveDb();
+      return send(res, 200, db.ps2Cards);
+    }
+  }
+  if (p === '/api/ps2/cards/info' && M === 'GET') return send(res, 200, db.ps2Cards || { version: 0 });
+
   if (p === '/api/info' && M === 'GET') {
-    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES });
+    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info() });
   }
 
   // sizes of the emulator files the browser would need for a platform
   if ((m = p.match(/^\/api\/platforms\/([\w]+)\/files$/)) && M === 'GET') {
+    const b = db.bios[m[1]];
+    const bios = b ? { url: `/api/bios/${m[1]}/${encodeURIComponent(b.file)}?v=${b.mtime}`, size: b.size, file: b.file } : null;
+    if (PLATFORMS[m[1]]?.engine === 'tst') {
+      await tst.ensure(); // first PS2 game: the server copies the emulator site once (~17 MB)
+      return send(res, 200, { engine: 'tst', build: tst.build, core: tst.manifest(), runtime: [], bios });
+    }
     const opts = { webgl2: url.searchParams.get('webgl2') !== '0', threads: url.searchParams.get('threads') === '1' };
     const core = await Promise.all(coreFiles(m[1], opts).map(async (f) => ({ path: f, size: await ejsSize(f) })));
     const runtime = await Promise.all(RUNTIME_FILES.map(async (f) => ({ path: f, size: await ejsSize(f) })));
-    const b = db.bios[m[1]];
-    return send(res, 200, { core, runtime, bios: b ? { url: `/api/bios/${m[1]}/${encodeURIComponent(b.file)}?v=${b.mtime}`, size: b.size, file: b.file } : null });
+    return send(res, 200, { core, runtime, bios });
   }
 
   if (p === '/api/games' && M === 'GET') {

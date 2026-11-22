@@ -194,7 +194,7 @@ function buildMenubar(bar, spec) {
 // ======================= dialogs =======================
 function msgbox(text, { title = 'RetroDesk 98', ic = 'info', buttons = ['OK'], html = false } = {}) {
   return new Promise((resolve) => {
-    const body = h(`<div><div class="row">${icon(ic)}<div style="padding-top:8px;max-width:380px">${html ? text : esc(text)}</div></div><div class="buttons"></div></div>`);
+    const body = h(`<div><div class="row">${icon(ic)}<div style="padding-top:8px;max-width:380px${html ? "" : ";white-space:pre-line"}">${html ? text : esc(text)}</div></div><div class="buttons"></div></div>`);
     const win = createWindow({ title, ic, w: 360, body, dialog: true, onClose: () => resolve(null) });
     buttons.forEach((b, i) => {
       const btn = h(`<button>${esc(b)}</button>`);
@@ -409,7 +409,7 @@ function uploadReport(added) {
     ${added.map((g) => `<tr><td>${icon(platformIcon(g.platform)).replace('<svg', '<svg width="16" height="16" style="vertical-align:-3px;margin-right:4px"')}${esc(g.title)}${g.serial ? ` <span class="muted">${esc(g.serial)}</span>` : ''}</td>
       <td><select data-id="${g.id}">${plats.map((p) => `<option value="${p.id}" ${p.id === g.platform ? 'selected' : ''}>${esc(p.short)}</option>`).join('')}</select></td>
       <td class="${g.guessed || g.platform === 'unknown' ? 'warn' : 'muted'}">${esc(g.detection)}</td></tr>`).join('')}</tbody></table></div>
-    ${added.some((g) => !g.playable) ? `<p class="warn">Some games are on consoles that can't run in a browser yet (PS2, GameCube, Wii, PS Vita). They are stored on the server for safekeeping.</p>` : ''}
+    ${added.some((g) => !g.playable) ? `<p class="warn">Some games are on consoles that can't run in a browser yet (${[...new Set(added.filter((g) => !g.playable).map((g) => g.platformShort))].map(esc).join(', ')}). They are stored on the server for safekeeping.</p>` : ''}
     <div class="buttons"><button class="ok">OK</button></div></div>`);
   const win = createWindow({ title: 'Upload Complete', ic: 'info', w: 600, body, dialog: true });
   body.querySelectorAll('select').forEach((s) => (s.onchange = async () => { await api(`/games/${s.dataset.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: s.value }) }); refresh(); }));
@@ -421,12 +421,15 @@ async function requirements(g) {
   const p = INFO.platforms[g.platform];
   const threads = !!p.threads;
   const files = await api(`/platforms/${g.platform}/files?webgl2=${store.webgl2() ? 1 : 0}&threads=${threads ? 1 : 0}`);
-  const sys = [...files.runtime.map((f) => ({ ...f, group: 'runtime' })), ...files.core.map((f) => ({ ...f, group: 'core' }))].map((f) => ({ ...f, url: '/ejs/' + f.path }));
+  const sys = files.engine === 'tst'
+    ? files.core.map((f) => ({ ...f, group: f.core ? 'core' : 'runtime' }))   // PS2: TabStationToo's module + its page
+    : [...files.runtime.map((f) => ({ ...f, group: 'runtime' })), ...files.core.map((f) => ({ ...f, group: 'core' }))].map((f) => ({ ...f, url: '/ejs/' + f.path }));
   if (files.bios) sys.push({ path: files.bios.file, url: files.bios.url, size: files.bios.size, group: 'bios' });
   await Promise.all(sys.map(async (f) => { f.cached = (await store.cachedSize(store.SYS, f.url)) != null; }));
   const game = { url: g.romUrl, size: g.size, cached: g.inBrowser };
   const est = await store.estimate();
-  return { p, sys, game, est, threads, bios: files.bios };
+  if (files.build) INFO.tst = { ...INFO.tst, installed: true, build: files.build };
+  return { p, sys, game, est, threads, bios: files.bios, engine: files.engine || 'ejs', build: files.build };
 }
 
 async function preparePlay(g) {
@@ -441,17 +444,23 @@ async function preparePlay(g) {
   const states = await api(`/games/${g.id}/states`).catch(() => []);
   const auto = states.find((s) => s.slot === 'auto');
   const R = await requirements(g);
-  const groups = { runtime: 'EmulatorJS runtime (shared)', core: `Emulator core: ${p.core}`, bios: 'BIOS' };
+  const groups = R.engine === 'tst'
+    ? { core: 'PS2 emulator: TabStationToo (PCSX2)', runtime: 'TabStationToo page (interface, fonts, title list)', bios: 'BIOS' }
+    : { runtime: 'EmulatorJS runtime (shared)', core: `Emulator core: ${p.core}`, bios: 'BIOS' };
   const sum = (arr) => arr.reduce((a, f) => a + (f.size || 0), 0);
   const sysNeed = R.sys.filter((f) => !f.cached);
   const rowsHtml = Object.entries(groups).map(([k, label]) => {
     const fs = R.sys.filter((f) => f.group === k);
     if (!fs.length) return '';
     const need = fs.filter((f) => !f.cached);
-    return `<tr><td>${esc(label)}<br><span class="muted">${fs.map((f) => esc(f.path.split('/').pop())).join(', ')}</span></td><td class="num">${fmt(sum(fs))}</td><td>${need.length ? `<span class="warn">Download ${fmt(sum(need))}</span>` : '<span class="ok">✓ In browser</span>'}</td></tr>`;
+    const names = fs.length > 4 ? `${fs.length} files` : fs.map((f) => esc(f.path.split('/').pop())).join(', ');
+    return `<tr><td>${esc(label)}<br><span class="muted">${names}</span></td><td class="num">${fmt(sum(fs))}</td><td>${need.length ? `<span class="warn">Download ${fmt(sum(need))}</span>` : '<span class="ok">✓ In browser</span>'}</td></tr>`;
   }).join('');
   const needSys = sum(sysNeed), needGame = R.game.cached ? 0 : R.game.size;
-  const memNote = R.game.size > 1.5 * 2 ** 30 ? `<p class="warn">Note: EmulatorJS loads the whole game into RAM (${fmt(R.game.size)}). Large games need a 64-bit browser with plenty of memory.</p>` : '';
+  const memNote = R.engine === 'tst'
+    ? `<p class="muted">The PS2 emulator reads the disc in pieces as the game needs them, so “Play without keeping” streams from your server and loads nothing big into memory.</p>
+       <p class="warn">${esc(p.note)}${navigator.gpu ? '' : ' This browser has no WebGPU, so the picture is drawn in software (slower).'}</p>`
+    : R.game.size > 1.5 * 2 ** 30 ? `<p class="warn">Note: EmulatorJS loads the whole game into RAM (${fmt(R.game.size)}). Large games need a 64-bit browser with plenty of memory.</p>` : '';
   const body = h(`<div style="width:540px">
     <div class="row">${icon(platformIcon(g.platform))}<div><b>${esc(g.title)}</b><br><span class="muted">${esc(p.name)} · ${esc(g.file)}</span></div></div>
     <fieldset style="margin-top:10px"><legend>Data this browser needs</legend>
@@ -464,7 +473,7 @@ async function preparePlay(g) {
       ${R.est.quota && needSys + needGame > R.est.free ? '<p class="warn">Not enough free browser storage to keep this game. Use “Play without keeping”, or free space in Storage Manager.</p>' : ''}
       ${R.est.persisted ? '' : '<p class="muted">Storage is “best effort”: the browser may evict it under pressure. <a href="#" class="persist">Make storage persistent</a></p>'}
     </fieldset>${memNote}
-    <div class="field-row" style="margin-top:8px">${auto ? `<input type="checkbox" id="resume" checked><label for="resume">Resume where I left off (auto-save ${new Date(auto.time).toLocaleString()})</label>` : `<span class="muted">Saves &amp; states sync to the server automatically.</span>`}</div>
+    <div class="field-row" style="margin-top:8px">${auto ? `<input type="checkbox" id="resume" checked><label for="resume">Resume where I left off (auto-save ${new Date(auto.time).toLocaleString()})</label>` : `<span class="muted">${R.engine === 'tst' ? 'Memory cards &amp; states' : 'Saves &amp; states'} sync to the server automatically.</span>`}</div>
     <div class="buttons"><button class="keep" ${R.est.quota && needSys + needGame > R.est.free ? 'disabled' : ''}><b>${needGame ? 'Download &amp; Play' : 'Play'}</b></button>
       ${R.game.cached ? '' : '<button class="stream">Play without keeping</button>'}<button class="cancel">Cancel</button></div></div>`);
   const win = createWindow({ title: 'Start Game', ic: 'gamepad', w: 580, body, dialog: true });
@@ -530,16 +539,26 @@ async function cacheGameDialog(g) {
 function launch(g, mode, resume) {
   const id = 'game-' + g.id;
   if (wins.has(id)) return focusWin(wins.get(id));
-  const frame = h(`<iframe allow="fullscreen; gamepad; autoplay; cross-origin-isolated" src="/play.html?id=${g.id}&mode=${mode}${resume ? '&resume=1' : ''}"></iframe>`);
+  const ps2 = INFO.platforms[g.platform]?.engine === 'tst';
+  const page = ps2 ? '/ps2.html' : '/play.html';
+  const frame = h(`<iframe allow="fullscreen; gamepad; autoplay; cross-origin-isolated" src="${page}?id=${g.id}&mode=${mode}${resume ? '&resume=1' : ''}"></iframe>`);
+  const send = (msg) => frame.contentWindow.postMessage(msg, location.origin);
   let exiting = false;
   const slotItems = (cmd) => ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((s) => ({ label: 'Slot ' + s, action: () => frame.contentWindow.postMessage({ cmd, slot: s }, location.origin) }));
   const win = createWindow({
     id, title: g.title, ic: 'gamepad', w: 800, hgt: 640, cls: 'game', body: frame,
     menubar: {
       Game: [{ label: 'Save state', sub: slotItems('saveState') }, { label: 'Load state', sub: slotItems('loadState') }, { label: 'Load auto-save', action: () => frame.contentWindow.postMessage({ cmd: 'loadState', slot: 'auto' }, location.origin) }, '-',
-        { label: 'Sync save data now', action: () => frame.contentWindow.postMessage({ cmd: 'syncSave' }, location.origin) }, '-',
+        { label: ps2 ? 'Sync memory cards now' : 'Sync save data now', action: () => frame.contentWindow.postMessage({ cmd: 'syncSave' }, location.origin) }, '-',
         { label: 'Controls / remap buttons…', action: () => frame.contentWindow.postMessage({ cmd: 'controls' }, location.origin) }, '-', { label: 'Exit  (hold Select+Start)', action: () => closeWin(win) }],
-      View: () => {
+      View: ps2 ? () => {
+        let panel = false; try { panel = localStorage.getItem('rd-ps2-panel') === '1'; } catch {}
+        return [{ label: fsElement() ? 'Exit full screen' : 'Full screen', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(frame)) },
+          { label: 'Maximize', check: win.el.classList.contains('max'), action: () => win.toggleMax() }, '-',
+          { label: 'Show emulator panel (TV, console, remote, controllers)', check: panel, action: () => send({ cmd: 'panel', show: !panel }) }, '-',
+          { label: `PS2 emulator: TabStationToo ${INFO.tst?.build || ''}`, disabled: true },
+          { label: 'Check for emulator update…', action: ps2Update }];
+      } : () => {
         let pref = 'auto'; try { pref = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
         const setV = (v) => { try { localStorage.setItem('rd-vpad', v); } catch {} frame.contentWindow.postMessage({ cmd: 'vpad' }, location.origin); };
         const touch = navigator.maxTouchPoints > 0;
@@ -559,7 +578,7 @@ function launch(g, mode, resume) {
         const fin = () => { removeEventListener('message', onMsg); clearTimeout(t); resolve(true); refresh(); };
         const onMsg = (e) => { if (e.data?.type === 'exited' && e.data.gameId === g.id) fin(); };
         addEventListener('message', onMsg);
-        const t = setTimeout(fin, 8000);
+        const t = setTimeout(fin, ps2 ? 25000 : 8000); // a PS2 state is tens of MB
         frame.contentWindow.postMessage({ cmd: 'exit' }, location.origin);
       });
     },
@@ -575,6 +594,22 @@ addEventListener('message', (e) => {
 });
 function trayBlink() { const t = $('#tray-icons'); t.innerHTML = icon('upload'); t.title = 'Saved to server ' + new Date().toLocaleTimeString(); clearTimeout(trayBlink.t); trayBlink.t = setTimeout(() => (t.innerHTML = ''), 2500); }
 
+// TabStationToo is updated often; the server keeps one deploy and can fetch the newest.
+async function ps2Update() {
+  let c;
+  try { c = await api('/ps2/emulator?check=1'); } catch (e) { return msgbox('Could not reach the TabStationToo site: ' + e.message, { ic: 'error' }); }
+  if (!c.installed) return msgbox('The PS2 emulator is downloaded the first time you start a PS2 game.', { title: 'PS2 emulator' });
+  if (!c.updateAvailable) return msgbox(`The PS2 emulator is up to date.\n\nTabStationToo build ${c.build}, downloaded ${new Date(c.fetched).toLocaleString()}.`, { title: 'PS2 emulator' });
+  if ((await msgbox(`A newer TabStationToo build is available (${c.latest}; you have ${c.build}).\n\nUpdate now? PS2 games that are open keep running on the old build until you close them.`, { title: 'PS2 emulator', buttons: ['Update', 'Cancel'] })) !== 'Update') return;
+  try {
+    const r = await api('/ps2/emulator/update', { method: 'POST' });
+    INFO.tst = r;
+    // the old build's files in this browser's cache are no longer used
+    for (const f of await store.list(store.SYS)) if (f.path.startsWith('/tst/') && !f.path.startsWith(`/tst/${r.build}/`)) await store.remove(store.SYS, f.url);
+    msgbox(`Updated to TabStationToo build ${r.build}.`, { title: 'PS2 emulator' });
+  } catch (e) { msgbox('Update failed: ' + e.message, { ic: 'error' }); }
+}
+
 // ======================= properties =======================
 async function properties(g) {
   if (!g) return;
@@ -589,7 +624,7 @@ async function properties(g) {
         <tr><td>File:</td><td>${esc(g.file)}</td></tr>${g.bundled ? `<tr><td>Contains:</td><td>${g.bundled.map(esc).join('<br>')}</td></tr>` : ''}
         <tr><td>Size:</td><td>${fmt(g.size)} (${g.size.toLocaleString()} bytes)</td></tr>
         <tr><td>In this browser:</td><td>${g.inBrowser ? 'Yes' : 'No'}</td></tr>
-        ${p.playable ? `<tr><td>Emulator:</td><td>${esc(p.core)} (EmulatorJS ${esc(INFO.ejsVersion)})</td></tr>` : ''}
+        ${p.playable ? `<tr><td>Emulator:</td><td>${p.engine === 'tst' ? `TabStationToo ${esc(INFO.tst?.build || '(downloads on first play)')} (PCSX2, WebAssembly)` : `${esc(p.core)} (EmulatorJS ${esc(INFO.ejsVersion)})`}</td></tr>` : ''}
         <tr><td>Added:</td><td>${new Date(g.added).toLocaleString()}</td></tr>
         <tr><td>Last played:</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleString() : 'Never'}</td></tr>
         <tr><td>Play time:</td><td>${Math.floor(g.playTime / 3600)}h ${Math.floor((g.playTime % 3600) / 60)}m</td></tr></table>
@@ -612,7 +647,7 @@ async function openStorage() {
     const [est, sys, games] = await Promise.all([store.estimate(), store.list(store.SYS), store.list(store.GAMES)]);
     const byGroup = {};
     for (const f of sys) {
-      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : (f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)?.[1] ? 'Core: ' + f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)[1] : 'EmulatorJS runtime');
+      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : f.path.startsWith('/tst/') ? 'PS2 emulator: TabStationToo ' + f.path.split('/')[2] : (f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)?.[1] ? 'Core: ' + f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)[1] : 'EmulatorJS runtime');
       (byGroup[name] ||= []).push(f);
     }
     const sum = (a) => a.reduce((x, f) => x + f.size, 0);

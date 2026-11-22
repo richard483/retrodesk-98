@@ -1,0 +1,21 @@
+/* RetroDesk 98: TabStationToo (PS2) inside a game window.
+   Added to TabStationToo's index.html when served with ?rd=1 (lib/tst.js). With html.rd-compact the page shows
+   only the picture, like its own fullscreen view; RetroDesk's window menus do the rest. View → "Show emulator
+   panel" removes rd-compact and brings back TabStationToo's own interface (TV, console, remote, controllers). */
+
+html.rd-embed, html.rd-embed body { background: #000; }
+
+html.rd-compact body { overflow: hidden; }
+html.rd-compact .room { height: 100vh; height: 100dvh; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+html.rd-compact :is(.marquee, .credits, .pads, .tv, .sill, .transport, .drawer) { display: none !important; }
+html.rd-compact .theatre { grid-row: 1; padding: 0; grid-template-rows: minmax(0, 1fr); background: #000; }
+html.rd-compact .stage-box { padding: 0; }
+html.rd-compact .theatre :is(.screen, .slate),
+html.rd-compact .theatre:not(:fullscreen) :is(.screen, .slate) {
+  width: min(100cqw, calc(100cqh * 4 / 3));
+  translate: none;
+  border-radius: 0;
+}
+html.rd-compact .screen { outline: none !important; }
+/* the message card (loading, errors, "click for sound") stays readable in small windows */
+html.rd-compact .slate h2 { font-size: clamp(18px, 3.2vw, 30px); }
