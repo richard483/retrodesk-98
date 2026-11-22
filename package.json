@@ -1,0 +1,12 @@
+{
+  "name": "retrodesk98",
+  "version": "0.1.0",
+  "description": "Self-hosted game library that runs emulators in your browser (EmulatorJS), with a Windows 98 UI.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/"
+  }
+}
