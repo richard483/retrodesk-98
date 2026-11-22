@@ -15,6 +15,7 @@ open http://localhost:8098
 | `DATA_DIR`     | `./data`  | games, saves, BIOS, emulator mirror, `library.json` |
 | `EMU_PASSWORD` | (none)    | if set, the server requires HTTP Basic auth (any username) |
 | `EJS_VERSION`  | `4.3.0-pre` | EmulatorJS release to mirror (see [Performance](#performance)); `4.2.3` is the last stable one |
+| `DOWNLOAD_CHUNK_MB` | `300` | browsers download big files in pieces of this size (`0` = one request). See [Behind a proxy or tunnel](#behind-a-proxy-or-tunnel) |
 | `TST_URL`      | `https://tabstationtoo.github.io/TabStationToo/` | where the PS2 emulator (TabStationToo) is copied from |
 
 ### Docker
@@ -193,6 +194,18 @@ What you can check on your side:
 - **Hardware acceleration**: `chrome://gpu` should say *WebGL2: Hardware accelerated*. If it says software,
   turn on *Settings → System → Use graphics acceleration*.
 - For PSP, keep *Internal resolution* at 1× (480×272) in the emulator menu. Each step up costs GPU time.
+
+## Behind a proxy or tunnel
+
+Some proxies limit how big one response can be. Cloudflare Tunnel, for example, stops at 512 MB. So browsers download
+big files (keeping a game in the browser, *Play without keeping*, *Save to my computer*) in pieces of
+`DOWNLOAD_CHUNK_MB` (default 300 MB) using HTTP Range requests. Each piece goes into the same file, so
+nothing extra is held in memory. A piece that fails is retried up to 3 times, from the byte where it stopped.
+Set `DOWNLOAD_CHUNK_MB=0` to download in one request, or a smaller value for stricter proxies.
+PS2 discs are already read in 128 KB pieces, and emulator files are far below the limit.
+
+*Save to my computer* writes straight to the file you pick in Chrome and Edge. Other browsers collect the pieces first,
+then save.
 
 ## Mobile (phones & tablets)
 

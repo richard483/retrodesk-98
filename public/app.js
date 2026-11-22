@@ -332,7 +332,7 @@ function gameMenu(g, x, y) {
     { label: 'Play', bold: true, icon: 'gamepad', disabled: !g.playable, action: () => preparePlay(g) },
     g.inBrowser ? { label: 'Remove from this browser', action: () => uncacheGame(g) } : { label: 'Keep in this browser (download)', disabled: !g.playable, action: () => cacheGameDialog(g) },
     '-',
-    { label: 'Save to my computer', action: () => { const a = document.createElement('a'); a.href = g.romUrl + '?dl=1'; a.download = g.file; a.click(); } },
+    { label: 'Save to my computer', action: () => saveGameToDisk(g) },
     { label: 'Rename…', action: async () => { const t = await prompt98('Game title:', g.title); if (t) { await api(`/games/${g.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t }) }); refresh(); } } },
     { label: 'Change console', sub: plats.map((p) => ({ label: p.name, check: p.id === g.platform, action: async () => { await api(`/games/${g.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: p.id }) }); refresh(); } })) },
     '-',
@@ -521,6 +521,27 @@ async function downloadWithProgress(g, sysFiles, withGame) {
     await store.remove(store.GAMES, g.romUrl).catch(() => {});
     if (e.name !== 'AbortError') msgbox('Download failed: ' + e.message + (e.name === 'QuotaExceededError' ? '\nThe browser ran out of storage space.' : ''), { ic: 'error' });
     return false;
+  }
+}
+
+// Downloads the game file to the computer, in pieces (see store.chunkedStream), with a progress dialog.
+async function saveGameToDisk(g) {
+  const ac = new AbortController();
+  const body = h(`<div style="width:380px"><div class="row">${icon('drive')}<div style="flex:1"><p>Saving to your computer…</p><p class="f muted">${esc(g.file)}</p>
+    <div class="progress-indicator segmented"><span class="progress-indicator-bar" style="width:0%"></span></div><p class="n muted"></p></div></div><div class="buttons"><button class="cancel">Cancel</button></div></div>`);
+  let win = null; const t0 = Date.now();
+  const show = () => { win ??= createWindow({ title: 'Saving', ic: 'drive', w: 420, body, dialog: true, onClose: () => ac.abort() }); $('.cancel', body).onclick = () => closeWin(win); };
+  try {
+    const ok = await store.saveToDisk(g.romUrl, g.file, { signal: ac.signal, onProgress: (l, t) => {
+      show();
+      $('.progress-indicator-bar', body).style.width = (t ? (l / t) * 100 : 0) + '%';
+      $('.n', body).textContent = `${fmt(l)} of ${fmt(t)} (${fmt(l / ((Date.now() - t0) / 1000 || 1))}/s)`;
+    } });
+    if (win) { win.onClose = null; closeWin(win); }
+    if (ok) balloon(`Saved ${g.file}`);
+  } catch (e) {
+    if (win) { win.onClose = null; closeWin(win); }
+    if (e.name !== 'AbortError') msgbox('Download failed: ' + e.message, { ic: 'error' });
   }
 }
 

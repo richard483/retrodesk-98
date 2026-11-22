@@ -22,6 +22,10 @@ const DATA = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const EJS_VERSION = process.env.EJS_VERSION || '4.3.0-pre';
 const EJS_CDN = `https://cdn.emulatorjs.org/${EJS_VERSION}/data/`;
 const PASSWORD = process.env.EMU_PASSWORD || '';
+// Browsers download big files in pieces of this size (Range requests), so no single response exceeds a
+// proxy's limit (Cloudflare Tunnel: 512 MB). 0 = whole files in one request.
+const chunkMb = process.env.DOWNLOAD_CHUNK_MB === undefined || process.env.DOWNLOAD_CHUNK_MB === '' || isNaN(+process.env.DOWNLOAD_CHUNK_MB) ? 300 : +process.env.DOWNLOAD_CHUNK_MB;
+const DOWNLOAD_CHUNK = Math.max(0, Math.round(chunkMb * 2 ** 20));
 const PUBLIC = path.join(ROOT, 'public');
 const TST_URL = (process.env.TST_URL || 'https://tabstationtoo.github.io/TabStationToo/').replace(/\/?$/, '/');
 const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), tst: path.join(DATA, 'tst'), incoming: path.join(DATA, 'incoming') };
@@ -266,7 +270,7 @@ async function handle(req, res) {
   if (p === '/api/ps2/cards/info' && M === 'GET') return send(res, 200, db.ps2Cards || { version: 0 });
 
   if (p === '/api/info' && M === 'GET') {
-    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info() });
+    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), downloadChunk: DOWNLOAD_CHUNK });
   }
 
   // sizes of the emulator files the browser would need for a platform

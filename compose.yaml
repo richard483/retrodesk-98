@@ -12,6 +12,7 @@ services:
       - retrodesk-data:/data
     environment:
       EJS_VERSION: "4.3.0-pre"
+      DOWNLOAD_CHUNK_MB: "300"         # big downloads go in pieces of this size (Cloudflare Tunnel: max 512 MB per response)
       # EMU_PASSWORD: change-me    # uncomment to require a password (HTTP Basic auth)
 
 volumes:
