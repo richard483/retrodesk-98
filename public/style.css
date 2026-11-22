@@ -100,6 +100,8 @@ body { background: #008080; font-family: "Pixelated MS Sans Serif", Arial, sans-
 table.need { width: 100%; border-collapse: collapse; background: #fff; }
 table.need th, table.need td { padding: 2px 6px; text-align: left; white-space: nowrap; }
 table.need th { background: silver; font-weight: normal; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080; }
+table.need td.wrap { white-space: normal; min-width: 180px; }
+table.need.bios td { vertical-align: top; border-bottom: 1px solid #e0e0e0; }
 table.need td.num, table.need th.num { text-align: right; }
 table.need tr.total td { border-top: 1px solid #000; font-weight: bold; }
 .ok { color: #008000; } .warn { color: #a00000; } .muted { color: #808080; }
@@ -169,4 +171,16 @@ iframe:fullscreen { width: 100vw; height: 100vh; background: #000; }
   .title-bar-controls button { min-width: 22px; min-height: 20px; }
   .menubar > div { padding: 6px 10px; }
   #tasks button, #start { height: 24px; }
+}
+
+/* BIOS table on narrow screens: one card per console instead of 5 columns. */
+@media (max-width: 760px) {
+  table.need.bios thead { display: none; }
+  table.need.bios tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 4px; border-bottom: 1px solid #c0c0c0; }
+  table.need.bios td { display: block; border: 0; padding: 0; height: auto; line-height: 1.35; white-space: normal; min-width: 0; }
+  table.need.bios td.nobios { display: none; }
+  table.need.bios td:nth-child(1) { font-weight: bold; }
+  table.need.bios td:nth-child(2) { text-align: right; }
+  table.need.bios td:nth-child(3) { grid-column: 1 / -1; }
+  table.need.bios td:nth-child(5) { text-align: right; }
 }

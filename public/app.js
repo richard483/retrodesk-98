@@ -646,16 +646,35 @@ async function openStorage() {
 
 // ======================= BIOS =======================
 async function openBios() {
-  const win = createWindow({ id: 'bios', title: 'BIOS Files', ic: 'chip', w: 640, hgt: 420, body: '<div class="scroll" style="flex:1;padding:8px;background:silver"></div>' });
+  const win = createWindow({ id: 'bios', title: 'BIOS Files', ic: 'chip', w: 700, hgt: 560, body: '<div class="scroll" style="flex:1;padding:8px;background:silver"></div>' });
   const root = $('.scroll', win.body);
+  // Every console is listed, so nobody reads this as "the supported consoles". Sorted by how much the BIOS matters.
+  const LEVELS = {
+    required:    { rank: 0, label: '<b>Required</b>' },
+    recommended: { rank: 1, label: 'Recommended' },
+    optional:    { rank: 2, label: 'Optional' },
+    none:        { rank: 3, label: '<span class="muted">Not needed</span>' },
+    unplayable:  { rank: 4, label: '<span class="muted">Not playable in browser</span>' },
+  };
+  const levelOf = (p) => (!p.playable ? 'unplayable' : p.bios ? p.bios.level : 'none');
   async function render() {
     const have = await api('/bios');
-    const plats = Object.values(INFO.platforms).filter((p) => p.bios);
-    root.innerHTML = `<p>Some consoles need the original BIOS. Upload your own dump (one file per console; zip several files together).</p>
-      <table class="need"><thead><tr><th>Console</th><th>Expected file(s)</th><th>Status</th><th></th></tr></thead><tbody>
-      ${plats.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.bios.files.map(esc).join(', ')}<br><span class="muted">${esc(p.bios.note)}</span></td>
-        <td>${have[p.id] ? `<span class="ok">✓ ${esc(have[p.id].file)}</span><br><span class="muted">${fmt(have[p.id].size)}</span>` : p.bios.required ? '<span class="warn">Missing (required)</span>' : '<span class="muted">Not set</span>'}</td>
-        <td><button data-up="${p.id}">Upload…</button>${have[p.id] ? ` <button data-rm="${p.id}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
+    const plats = Object.values(INFO.platforms).filter((p) => p.id !== 'unknown')
+      .sort((a, b) => LEVELS[levelOf(a)].rank - LEVELS[levelOf(b)].rank || a.name.localeCompare(b.name));
+    const row = (p) => {
+      const lv = levelOf(p), h = have[p.id];
+      const files = p.bios ? `${p.bios.files.map(esc).join(', ')}<br><span class="muted">${esc(p.bios.note)}</span>`
+        : `<span class="muted">${lv === 'none' ? 'The emulator has everything built in.' : 'No browser emulator yet, so no BIOS is used.'}</span>`;
+      const status = !p.bios ? '<span class="muted">—</span>'
+        : h ? `<span class="ok">✓ ${esc(h.file)}</span><br><span class="muted">${fmt(h.size)}</span>`
+        : lv === 'required' ? '<span class="warn">Missing</span>' : '<span class="muted">Not uploaded</span>';
+      const btns = p.bios ? `<button data-up="${p.id}">Upload…</button>${h ? ` <button data-rm="${p.id}">Remove</button>` : ''}` : '';
+      return `<tr><td>${esc(p.name)}</td><td>${LEVELS[lv].label}</td><td class="wrap">${files}</td><td${p.bios ? "" : " class=\"nobios\""}>${status}</td><td>${btns}</td></tr>`;
+    };
+    root.innerHTML = `<p>Some consoles need a BIOS dumped from the original hardware. Upload your own dump (one file per console; zip several files together).
+      Consoles marked <i>Not needed</i> play without one.</p>
+      <table class="need bios"><thead><tr><th>Console</th><th>BIOS</th><th>Expected file(s)</th><th>Status</th><th></th></tr></thead><tbody>
+      ${plats.map(row).join('')}</tbody></table>`;
     root.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => {
       const pk = $('#biospicker');
       pk.onchange = async () => { const f = pk.files[0]; pk.value = ''; if (!f) return; await fetch(`/api/bios/${b.dataset.up}?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f }); render(); };

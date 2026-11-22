@@ -317,6 +317,7 @@ async function handle(req, res) {
     const dir = path.join(DIRS.bios, plat);
     if (M === 'GET') { const b = db.bios[plat]; return b ? serveFile(req, res, path.join(dir, b.file), { cache: 'public, max-age=31536000, immutable' }) : fail(res, 404, 'No BIOS'); }
     if (M === 'PUT') {
+      if (!PLATFORMS[plat].bios) return fail(res, 400, `${PLATFORMS[plat].name} does not use a BIOS`);
       const name = safeName(url.searchParams.get('name'));
       await rm(dir, { recursive: true, force: true }); await mkdir(dir, { recursive: true });
       await pipeline(req, createWriteStream(path.join(dir, name)));
