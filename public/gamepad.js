@@ -17,18 +17,20 @@ function pressedSet(p) {
 }
 
 // onButton(btn, padIndex) fires on press, and repeatedly while a direction is held.
-export function watchGamepads({ onButton, onConnect, onDisconnect, enabled = () => true }) {
+// paused(): skip polling entirely (a game is playing: the emulator reads the pads itself, and this page
+// shares the browser's main thread with the game's frame, so idle work here costs the game time).
+export function watchGamepads({ onButton, onConnect, onDisconnect, enabled = () => true, paused = () => false }) {
   const state = new Map(); // pad index -> Map(btn -> {t0, last})
   addEventListener('gamepadconnected', (e) => onConnect?.(e.gamepad));
   addEventListener('gamepaddisconnected', (e) => { state.delete(e.gamepad.index); onDisconnect?.(e.gamepad); });
-  function tick(now) {
+  function tick(now, silent = false) {
     for (const p of pads()) {
       const held = state.get(p.index) || new Map();
       const cur = pressedSet(p);
       for (const b of [...held.keys()]) if (!cur.has(b)) held.delete(b);
       for (const b of cur) {
         const h = held.get(b);
-        if (!h) { held.set(b, { t0: now, last: now }); if (enabled()) onButton(b, p.index); }
+        if (!h) { held.set(b, { t0: now, last: now }); if (!silent && enabled()) onButton(b, p.index); }
         else if (REPEATABLE.has(b) && now - h.t0 > DELAY && now - h.last > RATE) { h.last = now; if (enabled()) onButton(b, p.index); }
       }
       state.set(p.index, held);
@@ -36,5 +38,11 @@ export function watchGamepads({ onButton, onConnect, onDisconnect, enabled = () 
   }
   // A fixed 60 Hz timer rather than requestAnimationFrame: rAF pauses whenever the browser skips
   // rendering frames, so quick button taps can be missed. Browsers still throttle hidden tabs.
-  setInterval(() => tick(performance.now()), 16);
+  // Coming back from a pause, buttons still held (e.g. Select+Start that closed the game) are only
+  // recorded, not treated as new presses.
+  let wasPaused = false;
+  setInterval(() => {
+    if (paused()) { wasPaused = true; return; }
+    tick(performance.now(), wasPaused); wasPaused = false;
+  }, 16);
 }

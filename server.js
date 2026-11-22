@@ -17,7 +17,9 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 8098);
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
-const EJS_VERSION = process.env.EJS_VERSION || '4.2.3';
+// 4.3.0-pre: PSP hardware rendering works (broken in 4.2.3) and most cores run without Asyncify,
+// measured ~50% faster here. Set EJS_VERSION=4.2.3 to go back to the last stable release.
+const EJS_VERSION = process.env.EJS_VERSION || '4.3.0-pre';
 const EJS_CDN = `https://cdn.emulatorjs.org/${EJS_VERSION}/data/`;
 const PASSWORD = process.env.EMU_PASSWORD || '';
 const PUBLIC = path.join(ROOT, 'public');
@@ -215,8 +217,15 @@ async function handle(req, res) {
   const M = req.method;
   let m;
 
+  // EmulatorJS 4.3.0-pre fetches PPSSPP's assets from the page-relative "data/cores/ppsspp-assets.zip"
+  // instead of its data path (a bug in that release): serve it from the mirror.
+  if (p === '/data/cores/ppsspp-assets.zip') return serveFile(req, res, await ensureEjs('cores/ppsspp-assets.zip'), { cache: 'public, max-age=31536000, immutable' });
+
+  // /ejs/<version>/<file>: the version is part of the URL so browser caches never mix releases
   if (p.startsWith('/ejs/')) {
-    const rel = p.slice(5);
+    let rel = p.slice(5);
+    if (rel.startsWith(EJS_VERSION + '/')) rel = rel.slice(EJS_VERSION.length + 1);
+    else if (/^\d+\.\d+[^/]*\//.test(rel)) return fail(res, 404, `This server runs EmulatorJS ${EJS_VERSION}; reload the page`);
     if (!rel || rel.includes('..')) return fail(res, 400, 'bad path');
     const local = await ensureEjs(rel);
     return serveFile(req, res, local, { cache: 'public, max-age=31536000, immutable' });
@@ -269,7 +278,8 @@ async function handle(req, res) {
       return send(res, 200, { engine: 'tst', build: tst.build, core: tst.manifest(), runtime: [], bios });
     }
     const opts = { webgl2: url.searchParams.get('webgl2') !== '0', threads: url.searchParams.get('threads') === '1' };
-    const core = await Promise.all(coreFiles(m[1], opts).map(async (f) => ({ path: f, size: await ejsSize(f) })));
+    const pageRelative = EJS_VERSION.startsWith('4.3') ? new Set(['cores/ppsspp-assets.zip']) : new Set(); // see /data/ route
+    const core = await Promise.all(coreFiles(m[1], opts).map(async (f) => ({ path: f, size: await ejsSize(f), ...(pageRelative.has(f) ? { url: '/data/' + f } : {}) })));
     const runtime = await Promise.all(RUNTIME_FILES.map(async (f) => ({ path: f, size: await ejsSize(f) })));
     return send(res, 200, { core, runtime, bios });
   }

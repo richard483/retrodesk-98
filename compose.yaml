@@ -11,7 +11,7 @@ services:
       # run `mkdir -p data` first, then use `- ./data:/data` (the container runs as uid 1000).
       - retrodesk-data:/data
     environment:
-      EJS_VERSION: "4.2.3"
+      EJS_VERSION: "4.3.0-pre"
       # EMU_PASSWORD: change-me    # uncomment to require a password (HTTP Basic auth)
 
 volumes:

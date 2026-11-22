@@ -53,7 +53,8 @@ async function saveState(slot) {
 async function loadState(slot) {
   const r = await api(`/states/${slot}`);
   if (!r.ok) return toast(`Slot ${slot} is empty`);
-  gm.loadState(new Uint8Array(await r.arrayBuffer()));
+  try { gm.loadState(new Uint8Array(await r.arrayBuffer())); }
+  catch { return toast(`Could not load slot ${slot} (made by another emulator version?)`); }
   toast(`State loaded (slot ${slot})`);
 }
 const currentSlot = () => emu.getSettingValue?.('save-state-slot') || '1';
@@ -68,7 +69,9 @@ async function flushAll({ autoState = false } = {}) {
 async function main() {
   const game = await (await api('')).json();
   document.title = game.title;
-  const plat = (await (await fetch('/api/info')).json()).platforms[game.platform];
+  const info = await (await fetch('/api/info')).json();
+  const plat = info.platforms[game.platform];
+  const ejsBase = `/ejs/${info.ejsVersion}/`;
   if (!plat?.playable) { setStatus(`${plat?.name || game.platform} cannot run in the browser.`); return; }
 
   let file = mode === 'keep' ? await gameFile(game) : null;
@@ -87,7 +90,7 @@ async function main() {
     EJS_core: plat.system,
     EJS_gameUrl: file,                 // a File: EmulatorJS reads it straight from memory/cache
     EJS_gameName: game.title,
-    EJS_pathtodata: '/ejs/',
+    EJS_pathtodata: ejsBase,
     EJS_biosUrl: files.bios?.url || '',
     EJS_startOnLoaded: true,
     EJS_threads: !!plat.threads,
@@ -96,7 +99,7 @@ async function main() {
     EJS_backgroundColor: '#000000',
     EJS_language: 'en-US',
     EJS_disableAutoLang: false,        // (sic) EmulatorJS only skips auto-language when this is === false
-    EJS_defaultOptions: { 'save-state-location': 'download' },
+    EJS_defaultOptions: { 'save-state-location': 'download', ...(plat.options || {}) },
     EJS_onSaveState: async ({ state }) => {
       try { await putState(currentSlot(), state, await screenshot()); toast(`State saved to server (slot ${currentSlot()})`); } catch (e) { toast('Save failed: ' + e.message); }
     },
@@ -125,7 +128,7 @@ async function main() {
     },
   });
   const s = document.createElement('script');
-  s.src = '/ejs/loader.js';
+  s.src = ejsBase + 'loader.js';
   document.body.appendChild(s);
 }
 

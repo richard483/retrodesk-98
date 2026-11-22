@@ -423,7 +423,7 @@ async function requirements(g) {
   const files = await api(`/platforms/${g.platform}/files?webgl2=${store.webgl2() ? 1 : 0}&threads=${threads ? 1 : 0}`);
   const sys = files.engine === 'tst'
     ? files.core.map((f) => ({ ...f, group: f.core ? 'core' : 'runtime' }))   // PS2: TabStationToo's module + its page
-    : [...files.runtime.map((f) => ({ ...f, group: 'runtime' })), ...files.core.map((f) => ({ ...f, group: 'core' }))].map((f) => ({ ...f, url: '/ejs/' + f.path }));
+    : [...files.runtime.map((f) => ({ ...f, group: 'runtime' })), ...files.core.map((f) => ({ ...f, group: 'core' }))].map((f) => ({ ...f, url: f.url || `/ejs/${INFO.ejsVersion}/${f.path}` }));
   if (files.bios) sys.push({ path: files.bios.file, url: files.bios.url, size: files.bios.size, group: 'bios' });
   await Promise.all(sys.map(async (f) => { f.cached = (await store.cachedSize(store.SYS, f.url)) != null; }));
   const game = { url: g.romUrl, size: g.size, cached: g.inBrowser };
@@ -640,6 +640,7 @@ async function properties(g) {
 }
 
 // ======================= storage manager =======================
+const CORE_RE = /^\/(?:ejs\/(?:[^/]+\/)?|data\/)cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/;
 async function openStorage() {
   const win = createWindow({ id: 'storage', title: 'Storage Manager', ic: 'drive', w: 620, hgt: 480, body: '<div class="scroll" style="flex:1;padding:8px;background:silver"></div>' });
   const root = $('.scroll', win.body);
@@ -647,7 +648,7 @@ async function openStorage() {
     const [est, sys, games] = await Promise.all([store.estimate(), store.list(store.SYS), store.list(store.GAMES)]);
     const byGroup = {};
     for (const f of sys) {
-      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : f.path.startsWith('/tst/') ? 'PS2 emulator: TabStationToo ' + f.path.split('/')[2] : (f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)?.[1] ? 'Core: ' + f.path.match(/^\/ejs\/cores\/(?:reports\/)?([a-z0-9_]+?)(?:-thread)?(?:-legacy)?(?:-wasm\.data|\.json|-assets\.zip)$/)[1] : 'EmulatorJS runtime');
+      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : f.path.startsWith('/tst/') ? 'PS2 emulator: TabStationToo ' + f.path.split('/')[2] : (CORE_RE.exec(f.path)?.[1] ? 'Core: ' + CORE_RE.exec(f.path)[1] : 'EmulatorJS runtime');
       (byGroup[name] ||= []).push(f);
     }
     const sum = (a) => a.reduce((x, f) => x + f.size, 0);
@@ -898,9 +899,14 @@ watchGamepads({
   onConnect: (p) => { trayPad(); balloon(`Controller connected: ${p.id.replace(/\s*\(.*$/, '')}`); },
   onDisconnect: (p) => { trayPad(); balloon(`Controller disconnected: ${p.id.replace(/\s*\(.*$/, '')}`); },
   enabled: () => document.visibilityState === 'visible' && fsElement()?.tagName !== 'IFRAME',
+  paused: () => !openMenu && !$('#startmenu') && (fsElement()?.tagName === 'IFRAME' || !!activeWin()?.id.startsWith('game-')),
 });
 
 // ======================= boot =======================
 INFO = await api('/info');
+// Emulator files cached for another EmulatorJS release (or before versioned URLs) are never used again.
+store.list(store.SYS).then(async (files) => {
+  for (const f of files) if ((f.path.startsWith('/ejs/') && !f.path.startsWith(`/ejs/${INFO.ejsVersion}/`)) || (f.path.startsWith('/data/') && !INFO.ejsVersion.startsWith('4.3'))) await store.remove(store.SYS, f.url);
+}).catch(() => {});
 await refresh();
 openLibrary();

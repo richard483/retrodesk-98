@@ -14,7 +14,7 @@ open http://localhost:8098
 | `HOST`         | `0.0.0.0` | bind address |
 | `DATA_DIR`     | `./data`  | games, saves, BIOS, emulator mirror, `library.json` |
 | `EMU_PASSWORD` | (none)    | if set, the server requires HTTP Basic auth (any username) |
-| `EJS_VERSION`  | `4.2.3`   | EmulatorJS release to mirror |
+| `EJS_VERSION`  | `4.3.0-pre` | EmulatorJS release to mirror (see [Performance](#performance)); `4.2.3` is the last stable one |
 | `TST_URL`      | `https://tabstationtoo.github.io/TabStationToo/` | where the PS2 emulator (TabStationToo) is copied from |
 
 ### Docker
@@ -160,12 +160,39 @@ game allows depends on the console and the game (for example N64 supports 4, NES
 
 PS2 games have 2 players (ports 1 and 2, no multitap). Assign pads in the emulator panel.
 
-**Online netplay: not available yet.** EmulatorJS 4.2.3 (the current stable release) ships its netplay
+**Online netplay: not available yet.** EmulatorJS 4.2.3 (the last stable release) ships its netplay
 switched off. It is only reachable in debug mode behind an experimental flag. When tested here, even with
 those flags on the netplay button stayed hidden, and EmulatorJS's public relay server
-(`netplay.emulatorjs.org`) returned HTTP 525. Revisit this when EmulatorJS 4.3 becomes a stable release.
+(`netplay.emulatorjs.org`) returned HTTP 525. EmulatorJS 4.3.0-pre (now the default here) adds netplay over WebRTC, which RetroDesk does not wire up yet.
 It would also need a relay ([EmulatorJS-Netplay](https://github.com/EmulatorJS/EmulatorJS-Netplay)) and a
 RetroDesk address both players can reach.
+
+## Performance
+
+**Why a game can lag while Task Manager looks idle.** An emulator runs the console's CPU on **one** thread. On an
+8-core/16-thread CPU, one thread at 100 % shows as about 6 % in Task Manager's total. The game is held back by
+that single thread, not by the machine as a whole. Look at the per-core graphs to see it.
+
+What RetroDesk does about it:
+- **EmulatorJS 4.3.0-pre by default.** It is a pre-release, but measured here (NES, speed limit off) it emulates
+  **~52 % faster** than 4.2.3 (1524 vs 999 frames/s), because most cores no longer run through Asyncify. For PSP it is
+  the fix that matters: in 4.2.3 PPSSPP's hardware rendering is broken, so PSP games are drawn in software on one
+  thread. 4.3 fixes hardware rendering, and EmulatorJS's notes call PSP "significantly more playable". To go back,
+  set `EJS_VERSION=4.2.3`. Emulator files are cached per version, so switching is clean. Save states made by one
+  version's cores may not load in the other; battery saves are not affected.
+- **PSP** is pinned to PPSSPP's IR interpreter, its fastest CPU mode in a browser (a browser cannot run its JIT).
+- **Threads stay off except for PSP.** Every core has a threaded build in 4.3, but measured here the threaded NES core
+  was slower (1279 vs 1524 frames/s). You can still turn it on per game in the emulator's own menu (Settings → Threads).
+- **The desktop stops polling controllers while a game is in front.** The game's frame shares the browser's main
+  thread with the desktop.
+
+What you can check on your side:
+- **Chrome's Energy Saver** caps pages at 30 frames per second. Turn it off in *Settings → Performance*,
+  or keep the laptop plugged in.
+- **Windows power mode**: set *Best performance* (Settings → System → Power).
+- **Hardware acceleration**: `chrome://gpu` should say *WebGL2: Hardware accelerated*. If it says software,
+  turn on *Settings → System → Use graphics acceleration*.
+- For PSP, keep *Internal resolution* at 1× (480×272) in the emulator menu. Each step up costs GPU time.
 
 ## Mobile (phones & tablets)
 
