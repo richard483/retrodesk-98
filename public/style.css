@@ -1,6 +1,8 @@
 /* Desktop shell on top of 98.css */
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+html { height: 100dvh; }
+body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 body { background: #008080; font-family: "Pixelated MS Sans Serif", Arial, sans-serif; font-size: 11px; }
 
 #desktop { position: absolute; inset: 0 0 28px 0; }
@@ -48,8 +50,7 @@ body { background: #008080; font-family: "Pixelated MS Sans Serif", Arial, sans-
 .list table { width: 100%; border-collapse: collapse; }
 .list th { position: sticky; top: 0; text-align: left; font-weight: normal; padding: 2px 6px; background: silver; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080; white-space: nowrap; cursor: default; }
 .list td { padding: 1px 6px; white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
-.list td:first-child { display: flex; align-items: center; gap: 4px; }
-.list td svg { width: 16px; height: 16px; flex: none; }
+.list td svg { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
 .list tr.sel td { background: #000080; color: #fff; }
 .list tr.unplayable td { color: #808080; }
 .list tr.sel.unplayable td { color: #c0c0c0; }
@@ -119,9 +120,6 @@ table.need tr.total td { border-top: 1px solid #000; font-weight: bold; }
 
 #shutdown { position: fixed; inset: 0; background: #000; color: #ff8000; display: flex; align-items: center; justify-content: center; font-size: 28px; z-index: 999999; cursor: pointer; text-align: center; }
 
-@media (max-width: 640px) {
-  .tree { display: none; }
-  .window.app { inset: 0 !important; width: auto !important; height: auto !important; }
 }
 
 /* tray balloon tooltip */
@@ -130,3 +128,45 @@ table.need tr.total td { border-top: 1px solid #000; font-weight: bold; }
 .balloon svg { width: 16px; height: 16px; flex: none; }
 #tray-pad { cursor: default; display: flex; }
 .menu .item.hot { background: #000080; color: #fff; }
+
+/* ======================= mobile / touch ======================= */
+.mobile-filter { display: none; }
+#desktop { bottom: calc(28px + env(safe-area-inset-bottom)); }
+#taskbar { height: calc(28px + env(safe-area-inset-bottom)); padding-bottom: calc(2px + env(safe-area-inset-bottom)); padding-left: max(2px, env(safe-area-inset-left)); padding-right: max(2px, env(safe-area-inset-right)); }
+#startmenu { bottom: calc(28px + env(safe-area-inset-bottom)); }
+
+/* the game window takes the whole screen on phones; the taskbar comes back when you minimise it */
+body.gaming #taskbar { display: none; }
+body.gaming #desktop { bottom: 0; }
+body.gaming .window.game { padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }
+
+/* a game iframe in browser full screen */
+iframe:fullscreen { width: 100vw; height: 100vh; background: #000; }
+
+@media (max-width: 760px), (pointer: coarse) and (max-height: 520px) {
+  .window.app:not(.dialog) { left: 0 !important; top: 0 !important; }
+  .window.app.dialog { left: 4px !important; right: 4px; width: auto !important; max-height: calc(100dvh - 40px); top: 8px !important; }
+  .window.app.dialog > .window-body { overflow: auto; margin: 8px !important; }
+  .dialog .window-body > div[style*="width"] { width: auto !important; }
+  .dialog fieldset, .dialog .sunken-panel { overflow-x: auto; }
+  .tree { display: none; }
+  .mobile-filter { display: block; max-width: 40vw; }
+  .toolbar { flex-wrap: wrap; }
+  .toolbar .lbl, .toolbar .sep { display: none; }
+  .toolbar input[type=text] { width: auto; flex: 1; min-width: 80px; margin-left: 0; }
+  .list td:nth-child(4), .list th:nth-child(4), .list td:nth-child(5), .list th:nth-child(5) { display: none; }
+  .status-bar .s2, .status-bar .s3 { display: none; }
+  .window.app .resize { display: none; }
+  .shots { grid-template-columns: repeat(2, 1fr); }
+  .kv td:first-child { white-space: normal; }
+}
+
+@media (pointer: coarse) {
+  .menu .item { padding-top: 9px; padding-bottom: 9px; }
+  #startmenu .item { padding-top: 10px; padding-bottom: 10px; }
+  .list td { padding-top: 7px; padding-bottom: 7px; }
+  .tree li { padding-top: 6px; padding-bottom: 6px; }
+  .title-bar-controls button { min-width: 22px; min-height: 20px; }
+  .menubar > div { padding: 6px 10px; }
+  #tasks button, #start { height: 24px; }
+}

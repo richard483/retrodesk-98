@@ -61,6 +61,8 @@ const ART = {
     '...kswswswswk...', '....kkkkkkkk....', '................', '................'],
 };
 
+export { ART, P };
+
 export function icon(name) {
   const art = ART[name] || ART.folder;
   let rects = '';

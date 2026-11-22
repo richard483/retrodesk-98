@@ -83,6 +83,59 @@ USB or Bluetooth. Browsers only reveal a controller **after you press a button**
 
 Controllers marked "non-standard layout" (some generic DirectInput pads) still work, but may need a one-time remap.
 
+## Multiplayer
+
+**Local multiplayer (same screen): supported, up to 4 players.** Connect a controller per player. The first
+controller is Player 1, the second is Player 2, and so on. This also covers controllers that were already
+connected before the game started. EmulatorJS on its own ignores those, so RetroDesk assigns them at game start.
+To change who is which player, open **Game → Controls / remap buttons…** and pick a controller per player.
+Each player has their own mapping, and the whole set is saved per console on the server. How many players a
+game allows depends on the console and the game (for example N64 supports 4, NES and SNES 2).
+
+**Online netplay: not available yet.** EmulatorJS 4.2.3 (the current stable release) ships its netplay
+switched off. It is only reachable in debug mode behind an experimental flag. When tested here, even with
+those flags on the netplay button stayed hidden, and EmulatorJS's public relay server
+(`netplay.emulatorjs.org`) returned HTTP 525. Revisit this when EmulatorJS 4.3 becomes a stable release.
+It would also need a relay ([EmulatorJS-Netplay](https://github.com/EmulatorJS/EmulatorJS-Netplay)) and a
+RetroDesk address both players can reach.
+
+## Mobile (phones & tablets)
+
+RetroDesk works on phones and tablets, in portrait and landscape. It re-lays out when you rotate.
+
+- **Layout:** windows open maximised. The console tree becomes a drop-down in the toolbar, toolbar buttons
+  shrink to icons, and dialogs fit the screen width. Touch targets are larger on touch screens.
+- **Touch:** tap a game to select it, tap it again to play. **Long-press** acts as right-click: it opens the
+  game menu (Keep in browser, Rename, Change console, Delete, Properties). Desktop icons open with one tap.
+- **While playing**, the game takes the whole screen and the taskbar hides. Minimise the game window to get
+  the taskbar back.
+- **On-screen controller:** use **View → On-screen controller** in the game window:
+  - *Auto* (default): shown on touch screens, hidden automatically while a physical controller is connected.
+  - *Always show* / *Hide*.
+
+  The choice is remembered per device. The touch controls sit under the picture in portrait and beside it in landscape.
+- **Physical controllers** (Bluetooth or USB-C) work on mobile exactly as on desktop.
+
+### Full screen on mobile: what's possible
+
+| Device / browser | True full screen? | How |
+|---|---|---|
+| Android: Chrome, Edge, Samsung Internet, Firefox | ✅ Yes | In a game: **View → Full screen**. For the whole desktop: **Start → Full screen mode**. Swipe from the edge or press Back to leave. |
+| Android, installed as an app | ✅ Yes, always | **Start → Install as app…** (or browser menu → *Install app* / *Add to Home screen*). It then opens full screen with no browser bars. |
+| iPad: Safari | ✅ Yes | **View → Full screen** works the same as on Android. |
+| iPhone: Safari, Chrome, any browser | ❌ Not for web pages | Apple only lets videos go full screen on iPhone. Use **Share → Add to Home Screen** and open RetroDesk from that icon. It runs without Safari's address bar and toolbar, which is as close to full screen as iOS allows. |
+
+How to install on each platform:
+
+1. **Android (Chrome):** open RetroDesk → **Start → Install as app…** → *Install*. Or use the browser menu ⋮ → *Install app*.
+2. **iPhone / iPad (Safari):** open RetroDesk → tap **Share** (□↑) → **Add to Home Screen** → *Add*.
+3. Launch it from the new **RetroDesk** icon on your home screen.
+
+> Installing and full screen need a **secure context**: `https://…`, or `http://localhost` on the same machine.
+> On a phone, `http://192.168.x.x:8098` loads, but browsers block service workers, installing, and
+> PSP's threaded core there. The easiest fix is [Tailscale](https://tailscale.com) (`tailscale serve 8098`
+> gives you an HTTPS URL) or a reverse proxy such as Caddy with a real certificate.
+
 ## Layout
 
 ```
@@ -94,6 +147,8 @@ public/              Win98 frontend (vanilla JS, no build step)
   play.html/js       emulator page (runs inside a game window), save sync
   store.js, sw.js    browser storage + service worker
   gamepad.js         controller polling for desktop navigation
+  manifest.webmanifest, icons/   installable app (PWA) metadata and icons
+scripts/make-icons.mjs  regenerates the PNG app icons from the pixel art
 test/                node --test
 ```
 

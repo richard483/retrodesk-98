@@ -33,7 +33,8 @@ export function watchGamepads({ onButton, onConnect, onDisconnect, enabled = () 
       }
       state.set(p.index, held);
     }
-    requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+  // A fixed 60 Hz timer rather than requestAnimationFrame: rAF pauses whenever the browser skips
+  // rendering frames, so quick button taps can be missed. Browsers still throttle hidden tabs.
+  setInterval(() => tick(performance.now()), 16);
 }

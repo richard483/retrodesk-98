@@ -91,7 +91,7 @@ async function main() {
     EJS_biosUrl: files.bios?.url || '',
     EJS_startOnLoaded: true,
     EJS_threads: !!plat.threads,
-    EJS_disableDatabases: true,        // we manage caching ourselves (no duplicate IndexedDB copies)
+    EJS_disableDatabases: true,
     EJS_color: '#000080',
     EJS_backgroundColor: '#000000',
     EJS_language: 'en-US',
@@ -106,6 +106,8 @@ async function main() {
       startedAt = Date.now();
       emu.on('saveSaveFiles', (data) => uploadSave(data));
       syncControls(game.platform, serverControls);
+      setTimeout(applyVpad, 600); // after EmulatorJS restores its own settings
+      assignPads(); setTimeout(assignPads, 600);
       // restore battery save from the server
       const r = await api('/save');
       if (r.status === 200) {
@@ -147,6 +149,38 @@ function syncControls(platform, serverControls) {
   };
 }
 
+// EmulatorJS only gives a controller a player slot when it sees it *connect* after its menus exist,
+// so pads that were already plugged in (e.g. used to browse the library) would be ignored.
+// Fill empty player slots with already-connected pads, in controller order: pad 1 = P1, pad 2 = P2…
+function assignPads() {
+  const sel = emu?.gamepadSelection, known = emu?.gamepad?.gamepads;
+  if (!Array.isArray(sel) || !known) return;
+  for (const gp of [...known].sort((a, b) => a.index - b.index)) {
+    const key = gp.id + '_' + gp.index;
+    if (sel.includes(key)) continue;
+    const free = sel.indexOf('');
+    if (free < 0) break;
+    sel[free] = key;
+  }
+  try { emu.updateGamepadLabels?.(); } catch {}
+}
+
+// On-screen (touch) controller. Preference is per device: auto | on | off.
+// auto = shown on touch screens, hidden while a physical controller is connected.
+const touchDevice = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+function applyVpad() {
+  if (!emu || !touchDevice) return;
+  let pref = 'auto'; try { pref = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
+  const physical = [...(navigator.getGamepads?.() || [])].some(Boolean);
+  const on = pref === 'on' || (pref === 'auto' && !physical);
+  try {
+    emu.toggleVirtualGamepad?.(on);                                        // actually shows/hides it
+    emu.changeSettingOption?.('virtual-gamepad', on ? 'enabled' : 'disabled'); // keeps EmulatorJS's own menu in sync
+  } catch (e) { console.warn(e); }
+}
+addEventListener('gamepadconnected', () => applyVpad());
+addEventListener('gamepaddisconnected', () => applyVpad());
+
 // Hold Select+Start (or Home) to leave the game from the couch.
 let comboSince = 0, comboHinted = false;
 setInterval(() => {
@@ -168,6 +202,7 @@ addEventListener('message', async (e) => {
     else if (cmd === 'loadState') await loadState(slot);
     else if (cmd === 'syncSave') { await flushAll(); toast('Save data synced'); }
     else if (cmd === 'pause') emu?.pause?.();
+    else if (cmd === 'vpad') applyVpad();
     else if (cmd === 'controls') { if (emu?.controlMenu) emu.controlMenu.style.display = ''; else toast('Start the game first'); }
     else if (cmd === 'fullscreen') document.getElementById('game').requestFullscreen?.();
     else if (cmd === 'exit') {

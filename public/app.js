@@ -13,6 +13,54 @@ const api = async (p, o = {}) => {
 };
 
 let INFO, GAMES = [], CACHED = new Set();
+// ---- device / mobile helpers ----
+const COARSE = matchMedia('(pointer: coarse)').matches;
+const isMobile = () => innerWidth <= 760 || (COARSE && innerHeight <= 520);
+const isStandalone = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let lastPointer = 'mouse';
+addEventListener('pointerdown', (e) => (lastPointer = e.pointerType), true);
+const tapped = () => lastPointer === 'touch' || lastPointer === 'pen';
+
+// Long-press = right-click on touch screens (iOS Safari never fires contextmenu by itself).
+// We synthesise it ourselves and swallow the browser's native one to avoid duplicates.
+let lpTimer = null, lpFired = false, lpStart = null;
+addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  lpFired = false; lpStart = { x: e.clientX, y: e.clientY, t: e.target };
+  clearTimeout(lpTimer);
+  lpTimer = setTimeout(() => {
+    lpFired = true;
+    lpStart.t.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: lpStart.x, clientY: lpStart.y }));
+  }, 550);
+}, true);
+addEventListener('pointermove', (e) => { if (lpStart && Math.hypot(e.clientX - lpStart.x, e.clientY - lpStart.y) > 10) clearTimeout(lpTimer); }, true);
+addEventListener('pointerup', () => clearTimeout(lpTimer), true);
+addEventListener('pointercancel', () => clearTimeout(lpTimer), true);
+addEventListener('contextmenu', (e) => { if (e.isTrusted && tapped()) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+addEventListener('click', (e) => { if (lpFired) { lpFired = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+
+// ---- fullscreen ----
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+const fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+async function enterFullscreen(el) {
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!fsSupported() || !req) return fullscreenHelp();
+  try { await req.call(el, { navigationUI: 'hide' }); } catch { fullscreenHelp(); }
+}
+const exitFullscreen = () => (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+function fullscreenHelp() {
+  if (isIOS && !isStandalone()) return msgbox('iPhone Safari does not let web pages go full screen.<br><br>For a full-screen, app-like experience: tap <b>Share</b> → <b>Add to Home Screen</b>, then open RetroDesk from the new home-screen icon. It runs without Safari\'s address bar and toolbar.', { html: true, title: 'Full screen' });
+  if (isStandalone()) return msgbox('You are already running RetroDesk as an app. On iPhone this is as full screen as iOS allows.', { title: 'Full screen' });
+  msgbox('This browser does not allow full screen here. Try Chrome or Firefox, or install RetroDesk as an app (Start → Install as app).', { ic: 'warn', title: 'Full screen' });
+}
+let installPrompt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+async function installApp() {
+  if (isStandalone()) return msgbox('RetroDesk is already installed and running as an app.');
+  if (installPrompt) { installPrompt.prompt(); installPrompt = null; return; }
+  msgbox(isIOS ? 'In Safari: tap <b>Share</b> → <b>Add to Home Screen</b>.' : 'Use your browser menu: <b>Install app</b> or <b>Add to Home screen</b>.<br><br>Installing needs HTTPS (or http://localhost).', { html: true, title: 'Install as app' });
+}
 if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js').catch(console.warn);
 
 // ======================= window manager =======================
@@ -24,7 +72,7 @@ function createWindow({ id, title, ic = 'folder', w = 640, hgt = 440, body, menu
   const wid = id || 'w' + ++winSeq;
   const vw = innerWidth, vh = innerHeight - 28;
   w = Math.min(w, vw - 8); hgt = Math.min(hgt, vh - 8);
-  const el = h(`<div class="window app ${cls} ${dialog ? 'dialog' : ''}" style="width:${w}px;height:${dialog ? 'auto' : hgt + 'px'};left:${x ?? Math.max(4, (vw - w) / 2 + (winSeq % 6) * 18 - 45)}px;top:${y ?? Math.max(4, (vh - hgt) / 2 + (winSeq % 6) * 18 - 45)}px">
+  const el = h(`<div class="window app ${cls} ${dialog ? 'dialog' : ''} ${!dialog && isMobile() ? 'max' : ''}" style="width:${w}px;height:${dialog ? 'auto' : hgt + 'px'};left:${x ?? Math.max(4, (vw - w) / 2 + (winSeq % 6) * 18 - 45)}px;top:${y ?? Math.max(4, (vh - hgt) / 2 + (winSeq % 6) * 18 - 45)}px">
     <div class="title-bar"><div class="title-bar-text">${icon(ic)}<span>${esc(title)}</span></div>
       <div class="title-bar-controls">${dialog ? '' : '<button aria-label="Minimize"></button><button aria-label="Maximize"></button>'}<button aria-label="Close"></button></div></div>
     ${menubar ? '<div class="menubar"></div>' : ''}
@@ -82,6 +130,8 @@ async function closeWin(win) {
 }
 
 function renderTasks() {
+  const aw = [...wins.values()].find((w) => w.el.classList.contains('active') && !w.el.classList.contains('min'));
+  document.body.classList.toggle('gaming', !!aw?.id.startsWith('game-') && isMobile());
   const t = $('#tasks'); t.innerHTML = '';
   for (const w of wins.values()) {
     if (w.dialog) continue;
@@ -181,12 +231,13 @@ function openLibrary() {
   let filter = 'all', query = '', sel = null, sortKey = 'title', sortDir = 1;
   const body = h(`<div style="display:contents">
     <div class="toolbar">
-      <button data-a="upload">${icon('upload')}Upload</button>
-      <button data-a="play" disabled>${icon('gamepad')}Play</button>
-      <button data-a="props" disabled>${icon('info')}Properties</button>
+      <button data-a="upload" title="Upload">${icon('upload')}<span class="lbl">Upload</span></button>
+      <button data-a="play" disabled title="Play">${icon('gamepad')}<span class="lbl">Play</span></button>
+      <button data-a="props" disabled title="Properties">${icon('info')}<span class="lbl">Properties</span></button>
       <div class="sep"></div>
-      <button data-a="storage">${icon('drive')}Storage</button>
-      <button data-a="bios">${icon('chip')}BIOS</button>
+      <button data-a="storage" title="Storage">${icon('drive')}<span class="lbl">Storage</span></button>
+      <button data-a="bios" title="BIOS">${icon('chip')}<span class="lbl">BIOS</span></button>
+      <select class="mobile-filter" title="Folder"></select>
       <input type="text" placeholder="Search…">
     </div>
     <div class="explorer"><div class="tree sunken-panel"></div><div class="list sunken-panel"></div></div>
@@ -213,6 +264,9 @@ function openLibrary() {
     tree.innerHTML = `<ul>${li('all', 'All Games', 'computer', GAMES.length)}${li('browser', 'In this browser', 'drive', GAMES.filter((g) => g.inBrowser).length)}${li('recent', 'Recently played', 'gamepad', GAMES.filter((g) => g.lastPlayed).length)}
       <li class="group">Consoles</li>${plats.map((p) => li(p.id, p.name, platformIcon(p.id), counts[p.id])).join('') || '<li class="muted">(empty)</li>'}</ul>`;
     tree.querySelectorAll('[data-f]').forEach((e) => (e.onclick = () => { filter = e.dataset.f; sel = null; render(); }));
+    const mf = $('.mobile-filter', body);
+    mf.innerHTML = [...tree.querySelectorAll('[data-f]')].map((e) => `<option value="${e.dataset.f}" ${e.dataset.f === filter ? 'selected' : ''}>${esc(e.querySelector('span').textContent)} (${e.querySelector('.count').textContent})</option>`).join('');
+    mf.onchange = () => { filter = mf.value; sel = null; render(); };
   }
 
   function rows() {
@@ -234,7 +288,7 @@ function openLibrary() {
           <td style="text-align:right">${fmt(g.size)}</td><td>${g.inBrowser ? '✓ Stored' : ''}</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleDateString() : ''}</td></tr>`).join('')}</tbody></table>`;
       list.querySelectorAll('th').forEach((t) => (t.onclick = () => { if (sortKey === t.dataset.k) sortDir *= -1; else { sortKey = t.dataset.k; sortDir = 1; } render(); }));
       list.querySelectorAll('tr[data-id]').forEach((tr) => {
-        tr.onclick = () => { sel = tr.dataset.id; render(); };
+        tr.onclick = () => { const again = sel === tr.dataset.id; sel = tr.dataset.id; render(); if (again && tapped()) preparePlay(cur()); };
         tr.ondblclick = () => preparePlay(cur());
         tr.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); sel = tr.dataset.id; render(); gameMenu(cur(), e.clientX, e.clientY); };
       });
@@ -266,6 +320,7 @@ function openLibrary() {
   };
   const onLib = () => { if (!GAMES.find((g) => g.id === sel)) sel = null; render(); };
   document.addEventListener('library', onLib);
+  if (COARSE) $('.status-bar .s3', body).title = 'Tap a game to select, tap again to play, long-press for more';
   win.onClose = () => document.removeEventListener('library', onLib);
   render();
 }
@@ -484,7 +539,18 @@ function launch(g, mode, resume) {
       Game: [{ label: 'Save state', sub: slotItems('saveState') }, { label: 'Load state', sub: slotItems('loadState') }, { label: 'Load auto-save', action: () => frame.contentWindow.postMessage({ cmd: 'loadState', slot: 'auto' }, location.origin) }, '-',
         { label: 'Sync save data now', action: () => frame.contentWindow.postMessage({ cmd: 'syncSave' }, location.origin) }, '-',
         { label: 'Controls / remap buttons…', action: () => frame.contentWindow.postMessage({ cmd: 'controls' }, location.origin) }, '-', { label: 'Exit  (hold Select+Start)', action: () => closeWin(win) }],
-      View: [{ label: 'Maximize', action: () => win.toggleMax() }, { label: 'Full screen', action: () => frame.contentWindow.postMessage({ cmd: 'fullscreen' }, location.origin) }],
+      View: () => {
+        let pref = 'auto'; try { pref = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
+        const setV = (v) => { try { localStorage.setItem('rd-vpad', v); } catch {} frame.contentWindow.postMessage({ cmd: 'vpad' }, location.origin); };
+        const touch = navigator.maxTouchPoints > 0;
+        return [{ label: fsElement() ? 'Exit full screen' : 'Full screen', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(frame)) },
+          { label: 'Maximize', check: win.el.classList.contains('max'), action: () => win.toggleMax() }, '-',
+          { label: 'On-screen controller', disabled: !touch, sub: !touch ? undefined : [
+            { label: 'Auto (hide when a controller is connected)', check: pref === 'auto', action: () => setV('auto') },
+            { label: 'Always show', check: pref === 'on', action: () => setV('on') },
+            { label: 'Hide', check: pref === 'off', action: () => setV('off') }] },
+          ...(touch ? [] : [{ label: '(on-screen controller is for touch screens)', disabled: true }])];
+      },
     },
     onClose: () => {
       if (exiting) return false;
@@ -499,6 +565,7 @@ function launch(g, mode, resume) {
     },
   });
   win.el.addEventListener('pointerdown', () => setTimeout(() => frame.focus()));
+  if (isMobile()) win.el.classList.add('max');
   setTimeout(() => frame.focus(), 300);
 }
 addEventListener('message', (e) => {
@@ -615,7 +682,7 @@ function renderDesktop() {
   const box = $('#icons'); box.innerHTML = '';
   for (const d of DESK) {
     const el = h(`<div class="dicon" tabindex="0">${icon(d.ic)}<span>${esc(d.label)}</span></div>`);
-    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); };
+    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (tapped()) d.action(); };
     el.ondblclick = d.action;
     el.onkeydown = (e) => { if (e.key === 'Enter') d.action(); };
     el.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu([{ label: 'Open', bold: true, action: d.action }], e.clientX, e.clientY); };
@@ -624,7 +691,7 @@ function renderDesktop() {
   // recently played games as desktop shortcuts
   for (const g of GAMES.filter((g) => g.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6)) {
     const el = h(`<div class="dicon" tabindex="0">${icon(platformIcon(g.platform))}<span>${esc(g.title)}</span></div>`);
-    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); };
+    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (tapped()) preparePlay(g); };
     el.ondblclick = () => preparePlay(g);
     el.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); gameMenu(g, e.clientX, e.clientY); };
     box.append(el);
@@ -657,6 +724,8 @@ startBtn.addEventListener('pointerdown', (e) => {
     { ic: 'chip', label: 'BIOS Files', action: openBios },
     { ic: 'gamepad', label: 'Controllers', action: openControllers },
     { ic: 'info', label: 'About', action: about }, '-',
+    { ic: 'computer', label: fsElement() ? 'Exit full screen' : 'Full screen mode', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(document.documentElement)) },
+    ...(isStandalone() ? [] : [{ ic: 'upload', label: 'Install as app…', action: installApp }]), '-',
     { ic: 'computer', label: 'Shut Down…', action: shutdown },
   ];
   for (const it of items) {
@@ -672,6 +741,11 @@ function shutdown() {
   const s = h('<div id="shutdown">It\'s now safe to turn off<br>your computer.<br><br><small style="font-size:12px;color:#888">(click to restart)</small></div>');
   s.onclick = () => s.remove(); document.body.append(s);
 }
+
+addEventListener('resize', () => {
+  if (isMobile()) for (const w of wins.values()) if (!w.dialog) w.el.classList.add('max');
+  renderTasks();
+});
 
 const clock = () => ($('#clock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
 clock(); setInterval(clock, 15000);
@@ -769,7 +843,7 @@ watchGamepads({
   onButton: padButton,
   onConnect: (p) => { trayPad(); balloon(`Controller connected: ${p.id.replace(/\s*\(.*$/, '')}`); },
   onDisconnect: (p) => { trayPad(); balloon(`Controller disconnected: ${p.id.replace(/\s*\(.*$/, '')}`); },
-  enabled: () => document.visibilityState === 'visible' && !document.fullscreenElement,
+  enabled: () => document.visibilityState === 'visible' && fsElement()?.tagName !== 'IFRAME',
 });
 
 // ======================= boot =======================
