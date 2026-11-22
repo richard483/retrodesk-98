@@ -1,0 +1,18 @@
+services:
+  retrodesk:
+    build: .
+    image: retrodesk98
+    container_name: retrodesk98
+    restart: unless-stopped
+    ports:
+      - "8098:8098"
+    volumes:
+      # Named volume: works out of the box. To keep the data in a host folder instead,
+      # run `mkdir -p data` first, then use `- ./data:/data` (the container runs as uid 1000).
+      - retrodesk-data:/data
+    environment:
+      EJS_VERSION: "4.2.3"
+      # EMU_PASSWORD: change-me    # uncomment to require a password (HTTP Basic auth)
+
+volumes:
+  retrodesk-data:

@@ -16,6 +16,27 @@ open http://localhost:8098
 | `EMU_PASSWORD` | (none)    | if set, the server requires HTTP Basic auth (any username) |
 | `EJS_VERSION`  | `4.2.3`   | EmulatorJS release to mirror |
 
+### Docker
+
+```
+docker compose up -d --build      # then open http://localhost:8098
+```
+
+or without compose:
+
+```
+docker build -t retrodesk98 .
+docker run -d --name retrodesk98 -p 8098:8098 -v retrodesk-data:/data --restart unless-stopped retrodesk98
+```
+
+- Everything the server stores (games, saves, BIOS, the EmulatorJS mirror, `library.json`) is in `/data`.
+  Keep it on a volume, or it is lost when the container is removed.
+- To use a host folder instead of a named volume, run `mkdir -p data` and mount `-v ./data:/data`. The container
+  runs as uid 1000, so the folder must be writable by that user.
+- Pass settings with `-e`, for example `-e EMU_PASSWORD=secret`. The env vars are listed in the table above.
+- The first time each console is played, the container downloads its core from the EmulatorJS CDN, so it needs outbound internet.
+- For phones or other machines, put HTTPS in front of it (see [Mobile](#mobile-phones--tablets)).
+
 ## What came from the community and what is new
 
 | Piece | Source |
@@ -150,6 +171,7 @@ public/              Win98 frontend (vanilla JS, no build step)
   manifest.webmanifest, icons/   installable app (PWA) metadata and icons
 scripts/make-icons.mjs  regenerates the PNG app icons from the pixel art
 test/                node --test
+Dockerfile, compose.yaml  container image + compose setup
 ```
 
 ## Notes

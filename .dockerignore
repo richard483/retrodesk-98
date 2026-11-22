@@ -1,0 +1,9 @@
+data
+node_modules
+test
+scripts
+.git
+idea
+*.md
+Dockerfile
+compose.yaml
