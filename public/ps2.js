@@ -3,6 +3,7 @@
 // can reach into its frame: it boots our BIOS and disc by URL (?bios= &disc=), saves and loads PCSX2
 // states into RetroDesk's server slots, and backs up the memory cards (kept in IndexedDB) to the server.
 import { putFile } from '/store.js';
+import { createVpad } from '/vpad.js';
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
 const resume = qs.get('resume') === '1';
@@ -217,6 +218,23 @@ async function loadState(slot) {
   } finally { busy = false; }
 }
 
+// ---------------------------------------------------------------- on-screen controller
+// TabStationToo has no touch controls, so RetroDesk draws one (vpad.js) and hands it to the emulator as a gamepad.
+// rd-vpad (shared with the other consoles): auto = on touch screens while no real controller is connected.
+let vpad = null;
+function applyVpad() {
+  if (!vpad) return;
+  let p = 'auto'; try { p = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
+  const on = p === 'on' || (p === 'auto' && matchMedia('(pointer: coarse)').matches && !vpad.realPads().length);
+  vpad.show(on);
+  try { W().document.documentElement.classList.toggle('rd-vpad', on); } catch {}
+}
+function startVpad() {
+  try { vpad = createVpad(W()); } catch (e) { console.warn('on-screen controller', e); return; }
+  applyVpad();
+  setInterval(applyVpad, 1500); // a controller connected or unplugged
+}
+
 // ---------------------------------------------------------------- the emulator page
 function setCompact(on) {
   try { W().document.documentElement.classList.toggle('rd-compact', on); } catch {}
@@ -238,10 +256,10 @@ async function main() {
   const src = `/tst/${files.build}/index.html?rd=1&bios=${encodeURIComponent(files.bios.url)}&disc=${encodeURIComponent(game.romUrl)}`;
   frame.src = src;
   frame.hidden = false;
-  frame.addEventListener('load', () => { setCompact(!panelShown()); setStatus(''); frame.focus(); }, { once: true });
+  frame.addEventListener('load', () => { setCompact(!panelShown()); setStatus(''); frame.focus(); startVpad(); }, { once: true });
   const notes = [];
   if (!navigator.gpu) notes.push('No WebGPU in this browser: the PS2 is drawn in software, which is slower.');
-  if (navigator.maxTouchPoints > 0 && !matchMedia('(pointer:fine)').matches) notes.push('Phones and tablets are not supported by the PS2 emulator yet.');
+  if (navigator.maxTouchPoints > 0 && !matchMedia('(pointer:fine)').matches) notes.push('The PS2 emulator is made for computers: a phone may be too slow or run out of memory.');
   if (notes.length) toast(notes.join(' '), 7000);
 
   // wait for the game to boot, then the extras
@@ -277,6 +295,7 @@ addEventListener('message', async (e) => {
     if (cmd === 'saveState') await saveState(slot);
     else if (cmd === 'loadState') await loadState(slot);
     else if (cmd === 'syncSave') { await pushCards(); toast('Memory cards synced to server'); }
+    else if (cmd === 'vpad') applyVpad();
     else if (cmd === 'panel') { setCompact(!e.data.show); frame.focus(); }
     else if (cmd === 'controls') {
       setCompact(false);

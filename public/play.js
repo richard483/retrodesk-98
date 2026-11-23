@@ -200,10 +200,12 @@ function assignPads() {
 // auto = shown on touch screens, hidden while a physical controller is connected.
 const touchDevice = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 function applyVpad() {
-  if (!emu || !touchDevice) return;
+  if (!emu) return;
   let pref = 'auto'; try { pref = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
+  if (!touchDevice && pref !== 'on' && !emu.rdVpadShown) return; // a computer: only when asked for
   const physical = [...(navigator.getGamepads?.() || [])].some(Boolean);
-  const on = pref === 'on' || (pref === 'auto' && !physical);
+  const on = pref === 'on' || (pref === 'auto' && touchDevice && !physical);
+  emu.rdVpadShown = on;
   try {
     emu.toggleVirtualGamepad?.(on);                                        // actually shows/hides it
     emu.changeSettingOption?.('virtual-gamepad', on ? 'enabled' : 'disabled'); // keeps EmulatorJS's own menu in sync

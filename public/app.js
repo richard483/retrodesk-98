@@ -54,6 +54,61 @@ function fullscreenHelp() {
   if (isStandalone()) return msgbox('You are already running RetroDesk as an app. On iPhone this is as full screen as iOS allows.', { title: 'Full screen' });
   msgbox('This browser does not allow full screen here. Try Chrome or Firefox, or install RetroDesk as an app (Start → Install as app).', { ic: 'warn', title: 'Full screen' });
 }
+// Game full screen: the game window covers the whole screen (no title bar, menus or taskbar), the browser goes full
+// screen where it allows it, and phones turn to landscape where the browser allows locking the orientation
+// (Android Chrome/Edge/Firefox in full screen; not iPhone, which shows a "turn your phone" hint instead).
+// The whole document goes full screen, not the game iframe, so RetroDesk's own message boxes stay visible.
+const pref = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const setPref = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const fsAuto = () => pref('rd-fs-start', COARSE ? '1' : '0') === '1';  // start games in full screen
+const fsLand = () => pref('rd-fs-landscape', '1') === '1';             // ... turned to landscape
+let fsWin = null;
+function browserFullscreen() { // call within a tap/click; resolves when the browser is in full screen (or cannot be)
+  const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (fsElement() || !fsSupported() || !req) return Promise.resolve();
+  return Promise.resolve(req.call(el, { navigationUI: 'hide' })).catch(() => {});
+}
+async function lockLandscape(win) {
+  win.el.classList.remove('want-landscape', 'hint-off');
+  if (!fsLand()) return;
+  try { await screen.orientation.lock('landscape'); }
+  catch { if (COARSE || navigator.maxTouchPoints > 0) win.el.classList.add('want-landscape'); } // CSS shows the hint only in portrait
+}
+async function gameFullscreen(win, on = !win.el.classList.contains('fs'), { browser = true } = {}) {
+  if (on) {
+    if (fsWin && fsWin !== win) fsWin.el.classList.remove('fs', 'want-landscape');
+    fsWin = win;
+    win.el.classList.add('fs'); document.body.classList.add('game-fs'); focusWin(win);
+    if (browser) await browserFullscreen();
+    await lockLandscape(win);
+  } else {
+    win.el.classList.remove('fs', 'want-landscape');
+    if (fsWin === win) { fsWin = null; document.body.classList.remove('game-fs'); }
+    try { screen.orientation.unlock(); } catch {}
+    if (fsElement()) await exitFullscreen()?.catch?.(() => {});
+  }
+  win.frame?.focus();
+}
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => {
+  // leaving browser full screen (Back, Esc, the browser's own button) also leaves game full screen
+  if (!fsElement() && fsWin) gameFullscreen(fsWin, false);
+});
+const FS_ICON = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path class="in" d="M1 5V1h4M11 1h4v4M15 11v4h-4M5 15H1v-4"/><path class="out" d="M5 1v4H1M15 5h-4V1M11 15v-4h4M1 11h4v4"/></svg>';
+function fsMenu(win) {
+  return [{ label: win.el.classList.contains('fs') ? 'Exit full screen' : 'Full screen', action: () => gameFullscreen(win) },
+    { label: 'Start games in full screen', check: fsAuto(), action: () => setPref('rd-fs-start', fsAuto() ? '0' : '1') },
+    { label: 'Landscape in full screen (phones, tablets)', check: fsLand(), action: () => { setPref('rd-fs-landscape', fsLand() ? '0' : '1'); if (win.el.classList.contains('fs')) { if (fsLand()) lockLandscape(win); else { try { screen.orientation.unlock(); } catch {} win.el.classList.remove('want-landscape'); } } } }];
+}
+// The on-screen controller, for every console (rd-vpad: auto | on | off). On a computer "Always show" is offered
+// too, for touch-screen laptops and for trying it out.
+function vpadMenu(send) {
+  const v = pref('rd-vpad', 'auto');
+  const setV = (x) => { setPref('rd-vpad', x); send({ cmd: 'vpad' }); };
+  return [{ label: 'On-screen controller', sub: [
+    { label: 'Auto (touch screens, hidden while a controller is connected)', check: v === 'auto', action: () => setV('auto') },
+    { label: 'Always show', check: v === 'on', action: () => setV('on') },
+    { label: 'Hide', check: v === 'off', action: () => setV('off') }] }];
+}
 let installPrompt = null;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
 async function installApp() {
@@ -126,6 +181,7 @@ function focusWin(win) {
 }
 async function closeWin(win) {
   if (win.onClose && (await win.onClose()) === false) return;
+  if (fsWin === win) gameFullscreen(win, false);
   win.el.remove(); wins.delete(win.id); renderTasks();
 }
 
@@ -471,6 +527,7 @@ async function preparePlay(g) {
   $('.persist', body)?.addEventListener('click', async (e) => { e.preventDefault(); const ok = await store.requestPersist(); e.target.parentElement.textContent = ok ? '✓ Storage is now persistent.' : 'The browser declined (Chrome grants it to sites you use often / install; Firefox asks).'; });
   $('.cancel', body).onclick = () => closeWin(win);
   const go = async (keep) => {
+    if (fsAuto()) browserFullscreen(); // needs this tap; the game window fills the screen when it opens
     closeWin(win);
     const resume = !!$('#resume', body)?.checked;
     const ok = await downloadWithProgress(g, sysNeed, keep && !R.game.cached);
@@ -566,22 +623,17 @@ function launch(g, mode, resume) {
         { label: 'Controls / remap buttons…', action: () => frame.contentWindow.postMessage({ cmd: 'controls' }, location.origin) }, '-', { label: 'Exit  (hold Select+Start)', action: () => closeWin(win) }],
       View: ps2 ? () => {
         let panel = false; try { panel = localStorage.getItem('rd-ps2-panel') === '1'; } catch {}
-        return [{ label: fsElement() ? 'Exit full screen' : 'Full screen', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(frame)) },
+        return [...fsMenu(win),
           { label: 'Maximize', check: win.el.classList.contains('max'), action: () => win.toggleMax() }, '-',
+          ...vpadMenu(send), '-',
           { label: 'Show emulator panel (TV, console, remote, controllers)', check: panel, action: () => send({ cmd: 'panel', show: !panel }) }, '-',
           { label: `PS2 emulator: TabStationToo ${INFO.tst?.build || ''}`, disabled: true },
           { label: 'Check for emulator update…', action: ps2Update }];
       } : () => {
-        let pref = 'auto', fps = false; try { pref = localStorage.getItem('rd-vpad') || 'auto'; fps = localStorage.getItem('rd-fps') === '1'; } catch {}
-        const setV = (v) => { try { localStorage.setItem('rd-vpad', v); } catch {} frame.contentWindow.postMessage({ cmd: 'vpad' }, location.origin); };
-        const touch = navigator.maxTouchPoints > 0;
-        return [{ label: fsElement() ? 'Exit full screen' : 'Full screen', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(frame)) },
+        const fps = pref('rd-fps', '0') === '1';
+        return [...fsMenu(win),
           { label: 'Maximize', check: win.el.classList.contains('max'), action: () => win.toggleMax() }, '-',
-          { label: 'On-screen controller', disabled: !touch, sub: !touch ? undefined : [
-            { label: 'Auto (hide when a controller is connected)', check: pref === 'auto', action: () => setV('auto') },
-            { label: 'Always show', check: pref === 'on', action: () => setV('on') },
-            { label: 'Hide', check: pref === 'off', action: () => setV('off') }] },
-          ...(touch ? [] : [{ label: '(on-screen controller is for touch screens)', disabled: true }]), '-',
+          ...vpadMenu(send), '-',
           { label: 'Show FPS', check: fps, action: () => frame.contentWindow.postMessage({ cmd: 'fps', on: !fps }, location.origin) },
           ...(psp ? ['-', { label: `PSP emulator: PPSSPP ${INFO.ppsspp?.build?.slice(0, 8) || ''}`, disabled: true },
             { label: 'PPSSPP menu (settings, graphics)…', action: () => send({ cmd: 'menu' }) },
@@ -600,8 +652,16 @@ function launch(g, mode, resume) {
       });
     },
   });
+  win.frame = frame;
+  // a full-screen button over the game on touch screens, where the menu bar is small and full screen hides it
+  const fsBtn = h(`<button class="fs-btn" title="Full screen" aria-label="Full screen">${FS_ICON}</button>`);
+  fsBtn.onclick = (e) => { e.stopPropagation(); gameFullscreen(win); };
+  const hint = h('<div class="rotate-hint"><div>⟳</div>Turn your device sideways for the full-size picture.<br><small>(tap to hide)</small></div>');
+  hint.onclick = () => win.el.classList.add('hint-off');
+  win.body.append(fsBtn, hint);
   win.el.addEventListener('pointerdown', () => setTimeout(() => frame.focus()));
   if (isMobile()) win.el.classList.add('max');
+  if (fsAuto()) gameFullscreen(win, true);
   setTimeout(() => frame.focus(), 300);
 }
 addEventListener('message', (e) => {
@@ -882,7 +942,7 @@ async function openControllers() {
   const renderMaps = async () => {
     const maps = await api('/controls');
     const ids = Object.keys(maps);
-    $('.maps', body).innerHTML = ids.length ? `<table class="need"><tbody>${ids.map((id) => `<tr><td>${esc(INFO.platforms[id]?.name || id)}</td><td class="muted">custom mapping</td><td><button data-reset="${esc(id)}">Reset to default</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No custom mappings. All consoles use the EmulatorJS defaults.</p>';
+    $('.maps', body).innerHTML = ids.length ? `<table class="need"><tbody>${ids.map((id) => `<tr><td>${esc(INFO.platforms[id]?.name || id)}</td><td class="muted">custom mapping</td><td><button data-reset="${esc(id)}">Reset to default</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No custom mappings. All consoles use their emulator\'s default buttons.</p>';
     body.querySelectorAll('[data-reset]').forEach((b) => (b.onclick = async () => { await api('/controls/' + b.dataset.reset, { method: 'DELETE' }); renderMaps(); }));
   };
   renderMaps();

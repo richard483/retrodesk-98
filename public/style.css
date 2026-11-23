@@ -184,3 +184,24 @@ iframe:fullscreen { width: 100vw; height: 100vh; background: #000; }
   table.need.bios td:nth-child(3) { grid-column: 1 / -1; }
   table.need.bios td:nth-child(5) { text-align: right; }
 }
+
+/* game full screen (app.js gameFullscreen): the game window covers the screen without its frame or the taskbar */
+.window.game > .window-body { position: relative; }
+.window.app.game.fs { position: fixed; inset: 0 !important; width: auto !important; height: auto !important; border: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: #000; }
+.window.game.fs > .title-bar, .window.game.fs > .menubar, .window.game.fs > .resize { display: none; }
+.window.game.fs > .window-body { margin: 0; }
+body.game-fs #taskbar { display: none; }
+body.game-fs #desktop { bottom: 0; }
+.fs-btn { display: none; position: absolute; top: 6px; left: 6px; z-index: 3; width: 36px; height: 36px; min-width: 0; min-height: 0; padding: 0; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.35) !important; color: #fff; border: 1px solid rgba(255,255,255,.45); border-radius: 6px; box-shadow: none !important; opacity: .55; touch-action: manipulation; }
+.fs-btn:active { opacity: 1; }
+.fs-btn .out, .window.game.fs .fs-btn .in { display: none; }
+.window.game.fs .fs-btn .out { display: inline; }
+@media (pointer: coarse) { .fs-btn { display: flex; } }
+.window.game.fs .fs-btn { display: flex; } /* the only way out of full screen on a phone */
+.rotate-hint { display: none; }
+@media (orientation: portrait) {
+  .window.game.fs.want-landscape:not(.hint-off) .rotate-hint { display: flex; position: absolute; inset: 0; z-index: 4; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    background: rgba(0,0,0,.8); color: #fff; font-size: 16px; text-align: center; padding: 24px; }
+  .rotate-hint > div { font-size: 56px; line-height: 1; }
+}

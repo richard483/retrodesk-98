@@ -131,8 +131,9 @@ WebAssembly. It is early and experimental, but games play.
 - A **PS2 BIOS** dumped from your own console (one 4 MB `.bin`, any region). Upload it in **BIOS Files**.
 - **Desktop Chrome or Edge**. Firefox works too. A fast CPU helps: heavy scenes run below full speed on slower machines.
   With WebGPU the hardware renderer is used; without it (Linux usually, or older browsers) the picture is drawn in
-  software, which is slower. Phones and tablets are not supported yet: the emulator reserves 512 MB of memory at start,
-  and it has no touch controls.
+  software, which is slower. Phones and tablets may struggle: the emulator reserves 512 MB of memory at start. It has
+  no touch controls of its own, so RetroDesk draws a PS2 controller over the picture (`public/vpad.js`) and hands it
+  to the emulator as a gamepad.
 - Disc images: `.iso`, single-track `.bin` (a `.cue` with one `.bin` is stored as the `.bin`), `.chd`, `.cso`, `.zso`.
   Multi-track BIN/CUE and CHDs with a parent are not supported by TabStationToo yet.
 
@@ -271,21 +272,26 @@ RetroDesk works on phones and tablets, in portrait and landscape. It re-lays out
   game menu (Keep in browser, Rename, Change console, Delete, Properties). Desktop icons open with one tap.
 - **While playing**, the game takes the whole screen and the taskbar hides. Minimise the game window to get
   the taskbar back.
-- **On-screen controller:** use **View → On-screen controller** in the game window:
+- **Full screen:** on touch screens a full-screen button sits in the game's top-left corner. Games start in full screen
+  on phones and tablets, turned to landscape where the browser allows it (Android); elsewhere a hint asks you to turn
+  the device. **View → Start games in full screen** and **View → Landscape in full screen** change this, per device.
+  The same button, Back or Esc leaves full screen.
+- **On-screen controller:** every console has one. Use **View → On-screen controller** in the game window:
   - *Auto* (default): shown on touch screens, hidden automatically while a physical controller is connected.
   - *Always show* / *Hide*.
 
   The choice is remembered per device. The touch controls sit under the picture in portrait and beside it in landscape.
+  PSP uses PPSSPP's own touch controls; a change applies from the next game start.
 - **Physical controllers** (Bluetooth or USB-C) work on mobile exactly as on desktop.
 
 ### Full screen on mobile: what's possible
 
 | Device / browser | True full screen? | How |
 |---|---|---|
-| Android: Chrome, Edge, Samsung Internet, Firefox | ✅ Yes | In a game: **View → Full screen**. For the whole desktop: **Start → Full screen mode**. Swipe from the edge or press Back to leave. |
+| Android: Chrome, Edge, Samsung Internet, Firefox | ✅ Yes, and turns to landscape | In a game: the full-screen button or **View → Full screen**. For the whole desktop: **Start → Full screen mode**. Swipe from the edge or press Back to leave. |
 | Android, installed as an app | ✅ Yes, always | **Start → Install as app…** (or browser menu → *Install app* / *Add to Home screen*). It then opens full screen with no browser bars. |
 | iPad: Safari | ✅ Yes | **View → Full screen** works the same as on Android. |
-| iPhone: Safari, Chrome, any browser | ❌ Not for web pages | Apple only lets videos go full screen on iPhone. Use **Share → Add to Home Screen** and open RetroDesk from that icon. It runs without Safari's address bar and toolbar, which is as close to full screen as iOS allows. |
+| iPhone: Safari, Chrome, any browser | ❌ Not for web pages | The full-screen button still hides RetroDesk's title bar, menus and taskbar. Apple only lets videos go full screen on iPhone. Use **Share → Add to Home Screen** and open RetroDesk from that icon. It runs without Safari's address bar and toolbar, which is as close to full screen as iOS allows. |
 
 How to install on each platform:
 
