@@ -283,6 +283,7 @@ public/              Win98 frontend (vanilla JS, no build step)
 scripts/make-icons.mjs  regenerates the PNG app icons from the pixel art
 test/                node --test
 Dockerfile, compose.yaml  container image + compose setup
+LICENSE              GNU GPL v3
 ```
 
 ## Notes
@@ -291,3 +292,25 @@ Dockerfile, compose.yaml  container image + compose setup
   secure context. To reach it from another device, put it behind HTTPS, for example with Caddy or Tailscale.
 - EmulatorJS loads the whole game into RAM, so very large PSP ISOs (1.5 GB+) need plenty of memory.
 - Only play games you own, and use BIOS dumps from your own consoles.
+
+## License
+
+RetroDesk 98 is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License](LICENSE), version 3 or (at your option) any later version. It comes with no warranty.
+
+Copyright (C) 2026 nephren and contributors.
+
+Why the GPL: RetroDesk runs inside the same pages as EmulatorJS and TabStationToo, both GPL-3.0. It calls into
+EmulatorJS's code and adds a script and stylesheet to TabStationToo's page, which it also redistributes from its own
+server. Using the same license keeps the combination clearly allowed.
+
+### Third-party software
+
+| Component | License | How it is used |
+|---|---|---|
+| [98.css](https://github.com/jdan/98.css) and its fonts | MIT (`public/vendor/98css/LICENSE`) | included in this repository |
+| [EmulatorJS](https://github.com/EmulatorJS/EmulatorJS) and its libretro cores | GPL-3.0; each core has its own license, shipped inside the core | downloaded by the server at runtime into `data/ejs/`, not included here |
+| [TabStationToo](https://github.com/TabStationToo/TabStationToo) (PCSX2 for the web) | GPL-3.0-or-later; its own notices are kept with the copy | downloaded by the server at runtime into `data/tst/`, not included here |
+
+No games or BIOS files are included or downloaded. Use only games and BIOS dumps you own.
+

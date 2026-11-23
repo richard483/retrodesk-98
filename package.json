@@ -2,6 +2,7 @@
   "name": "retrodesk98",
   "version": "0.1.0",
   "description": "Self-hosted game library that runs emulators in your browser (EmulatorJS), with a Windows 98 UI.",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "private": true,
   "engines": { "node": ">=22" },

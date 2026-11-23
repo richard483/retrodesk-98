@@ -7,7 +7,7 @@ ENV NODE_ENV=production \
     DATA_DIR=/data
 
 WORKDIR /app
-COPY package.json server.js ./
+COPY package.json server.js LICENSE ./
 COPY lib ./lib
 COPY public ./public
 
