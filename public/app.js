@@ -569,7 +569,7 @@ function launch(g, mode, resume) {
           { label: `PS2 emulator: TabStationToo ${INFO.tst?.build || ''}`, disabled: true },
           { label: 'Check for emulator update…', action: ps2Update }];
       } : () => {
-        let pref = 'auto'; try { pref = localStorage.getItem('rd-vpad') || 'auto'; } catch {}
+        let pref = 'auto', fps = false; try { pref = localStorage.getItem('rd-vpad') || 'auto'; fps = localStorage.getItem('rd-fps') === '1'; } catch {}
         const setV = (v) => { try { localStorage.setItem('rd-vpad', v); } catch {} frame.contentWindow.postMessage({ cmd: 'vpad' }, location.origin); };
         const touch = navigator.maxTouchPoints > 0;
         return [{ label: fsElement() ? 'Exit full screen' : 'Full screen', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(frame)) },
@@ -578,7 +578,8 @@ function launch(g, mode, resume) {
             { label: 'Auto (hide when a controller is connected)', check: pref === 'auto', action: () => setV('auto') },
             { label: 'Always show', check: pref === 'on', action: () => setV('on') },
             { label: 'Hide', check: pref === 'off', action: () => setV('off') }] },
-          ...(touch ? [] : [{ label: '(on-screen controller is for touch screens)', disabled: true }])];
+          ...(touch ? [] : [{ label: '(on-screen controller is for touch screens)', disabled: true }]), '-',
+          { label: 'Show FPS', check: fps, action: () => frame.contentWindow.postMessage({ cmd: 'fps', on: !fps }, location.origin) }];
       },
     },
     onClose: () => {

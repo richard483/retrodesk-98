@@ -183,6 +183,12 @@ What RetroDesk does about it:
   set `EJS_VERSION=4.2.3`. Emulator files are cached per version, so switching is clean. Save states made by one
   version's cores may not load in the other; battery saves are not affected.
 - **PSP** is pinned to PPSSPP's IR interpreter, its fastest CPU mode in a browser (a browser cannot run its JIT).
+- **PSP runs with VSync off, so the sound doesn't crackle.** EmulatorJS 4.3's sound driver queues only about 20 ms of
+  sound when frames are timed by the display. Each slow PSP frame is then a dropped frame and a gap in the sound.
+  With VSync off, RetroArch times frames by the sound instead: it keeps about 64 ms queued and catches up after a slow
+  frame. In a test with 60 ms stalls twice a second, gaps went from 15 in 8 seconds to none, and speed from 55.8 to
+  60 fps. Motion may be slightly less even; switch it back per game in the emulator menu (*Settings → VSync*). Other
+  consoles keep VSync on; turn it off the same way if one crackles.
 - **Threads stay off except for PSP.** Every core has a threaded build in 4.3, but measured here the threaded NES core
   was slower (1279 vs 1524 frames/s). You can still turn it on per game in the emulator's own menu (Settings → Threads).
 - **The desktop stops polling controllers while a game is in front.** The game's frame shares the browser's main
@@ -195,6 +201,8 @@ What you can check on your side:
 - **Hardware acceleration**: `chrome://gpu` should say *WebGL2: Hardware accelerated*. If it says software,
   turn on *Settings → System → Use graphics acceleration*.
 - For PSP, keep *Internal resolution* at 1× (480×272) in the emulator menu. Each step up costs GPU time.
+- **View → Show FPS** in a game window shows how many frames the emulator really runs per second. Green (about 60)
+  means full speed; anything lower means the game itself is too slow on this machine, not just the sound.
 
 ## Behind a proxy or tunnel
 

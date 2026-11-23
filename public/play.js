@@ -15,6 +15,32 @@ function toast(t, ms = 2500) { toastEl.textContent = t; toastEl.style.display = 
 const api = (p, o) => fetch(`/api/games/${id}${p}`, o);
 let startedAt = 0, lastSaveSig = '', emu, gm;
 
+// View → Show FPS: frames the emulator really ran per second (60 = full speed for most consoles).
+let fpsTimer;
+function showFps(on) {
+  let el = document.getElementById('fps');
+  clearInterval(fpsTimer);
+  if (!on) { el?.remove(); return; }
+  if (!el) {
+    el = Object.assign(document.createElement('div'), { id: 'fps' });
+    el.style.cssText = 'position:absolute;right:6px;top:6px;z-index:99998;background:rgba(0,0,0,.65);color:#7fff7f;font:12px monospace;padding:2px 5px;pointer-events:none';
+    document.body.append(el);
+  }
+  let last = null;
+  const tick = () => {
+    let n; try { n = gm?.functions?.getFrameNum?.(); } catch {}
+    const t = performance.now();
+    if (typeof n === 'number' && last && n >= last.n) {
+      const fps = ((n - last.n) * 1000) / (t - last.t), target = 60;
+      el.textContent = `${fps.toFixed(1)} fps`;
+      el.style.color = fps >= target * 0.97 ? '#7fff7f' : fps >= target * 0.85 ? '#ffd060' : '#ff7070';
+    } else if (!last) el.textContent = '… fps';
+    last = typeof n === 'number' ? { n, t } : null;
+  };
+  tick(); fpsTimer = setInterval(tick, 1000);
+}
+const fpsPref = () => { try { return localStorage.getItem('rd-fps') === '1'; } catch { return false; } };
+
 function sig(u8) { // cheap FNV-1a fingerprint to skip uploading unchanged SRAM
   let h = 0x811c9dc5;
   for (let i = 0; i < u8.length; i++) { h ^= u8[i]; h = Math.imul(h, 0x01000193); }
@@ -125,6 +151,7 @@ async function main() {
       }
       if (resume) setTimeout(() => loadState('auto'), 300);
       setInterval(() => { try { gm.saveSaveFiles(); } catch {} }, 30000);
+      if (fpsPref()) showFps(true);
       post({ type: 'started' });
     },
   });
@@ -207,6 +234,7 @@ addEventListener('message', async (e) => {
     else if (cmd === 'syncSave') { await flushAll(); toast('Save data synced'); }
     else if (cmd === 'pause') emu?.pause?.();
     else if (cmd === 'vpad') applyVpad();
+    else if (cmd === 'fps') { try { localStorage.setItem('rd-fps', e.data.on ? '1' : '0'); } catch {} showFps(e.data.on); }
     else if (cmd === 'controls') { if (emu?.controlMenu) emu.controlMenu.style.display = ''; else toast('Start the game first'); }
     else if (cmd === 'fullscreen') document.getElementById('game').requestFullscreen?.();
     else if (cmd === 'exit') {
