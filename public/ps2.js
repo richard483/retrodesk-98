@@ -2,6 +2,7 @@
 // TabStationToo is served from our own origin (/tst/<build>/, mirrored by the server), so this page
 // can reach into its frame: it boots our BIOS and disc by URL (?bios= &disc=), saves and loads PCSX2
 // states into RetroDesk's server slots, and backs up the memory cards (kept in IndexedDB) to the server.
+import { putFile } from '/store.js';
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
 const resume = qs.get('resume') === '1';
@@ -191,8 +192,9 @@ async function saveState(slot, { quiet = false } = {}) {
     const FS = stateDir(), path = `/states/rd-${slot}.p2s`;
     if (!(await stateOp(true, path))) { if (!quiet) toast('Saving the state failed'); return false; }
     const bytes = FS.readFile(path); try { FS.unlink(path); } catch {}
-    await api(`/states/${slot}`, { method: 'PUT', body: bytes });
-    if (shot) await api(`/states/${slot}/shot`, { method: 'PUT', body: shot }).catch(() => {});
+    try { await putFile(`/api/games/${id}/states/${slot}`, new Blob([bytes])); }
+    catch (e) { if (!quiet) toast('Saving the state to the server failed. ' + e.message, 8000); return false; }
+    if (shot) await putFile(`/api/games/${id}/states/${slot}/shot`, new Blob([shot])).catch(() => {});
     post({ type: 'saved', what: 'state', slot });
     if (!quiet) toast(slot === 'auto' ? 'Auto-save stored on server' : `State saved to server (slot ${slot})`);
     return true;

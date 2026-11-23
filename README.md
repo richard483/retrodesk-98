@@ -16,6 +16,7 @@ open http://localhost:8098
 | `EMU_PASSWORD` | (none)    | if set, the server requires HTTP Basic auth (any username) |
 | `EJS_VERSION`  | `4.3.0-pre` | EmulatorJS release to mirror (see [Performance](#performance)); `4.2.3` is the last stable one |
 | `DOWNLOAD_CHUNK_MB` | `300` | browsers download big files in pieces of this size (`0` = one request). See [Behind a proxy or tunnel](#behind-a-proxy-or-tunnel) |
+| `UPLOAD_CHUNK_MB` | `90` | largest piece browsers upload in one request (games, BIOS, save states); smaller automatically when a proxy answers 413 (`0` = one request) |
 | `TST_URL`      | `https://tabstationtoo.github.io/TabStationToo/` | where the PS2 emulator (TabStationToo) is copied from |
 
 ### Docker
@@ -206,6 +207,18 @@ PS2 discs are already read in 128 KB pieces, and emulator files are far below th
 
 *Save to my computer* writes straight to the file you pick in Chrome and Edge. Other browsers collect the pieces first,
 then save.
+
+Proxies also limit how big one *request* can be: Cloudflare's Free and Pro plans allow 100 MB, and nginx allows only
+1 MB unless `client_max_body_size` is set. Uploads of games, BIOS files and save states therefore go in pieces of
+at most `UPLOAD_CHUNK_MB` (default 90 MB). If the proxy still answers *413 Request Entity Too Large*, the browser
+halves the piece and sends it again, down to 256 KB, and remembers the size that worked. A failed BIOS upload leaves
+the BIOS already on the server in place.
+
+For nginx it is still worth raising the limit, because many small pieces upload more slowly than a few large ones:
+
+```nginx
+client_max_body_size 100m;   # in the server or location block for RetroDesk
+```
 
 ## Mobile (phones & tablets)
 

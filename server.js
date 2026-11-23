@@ -24,8 +24,11 @@ const EJS_CDN = `https://cdn.emulatorjs.org/${EJS_VERSION}/data/`;
 const PASSWORD = process.env.EMU_PASSWORD || '';
 // Browsers download big files in pieces of this size (Range requests), so no single response exceeds a
 // proxy's limit (Cloudflare Tunnel: 512 MB). 0 = whole files in one request.
-const chunkMb = process.env.DOWNLOAD_CHUNK_MB === undefined || process.env.DOWNLOAD_CHUNK_MB === '' || isNaN(+process.env.DOWNLOAD_CHUNK_MB) ? 300 : +process.env.DOWNLOAD_CHUNK_MB;
-const DOWNLOAD_CHUNK = Math.max(0, Math.round(chunkMb * 2 ** 20));
+const envMb = (name, def) => { const v = process.env[name]; return Math.max(0, Math.round((v === undefined || v === '' || isNaN(+v) ? def : +v) * 2 ** 20)); };
+const DOWNLOAD_CHUNK = envMb('DOWNLOAD_CHUNK_MB', 300);
+// Uploads go in pieces of at most this size (Cloudflare Free/Pro: 100 MB per request). When a proxy
+// still answers 413, the browser halves the piece and tries again, so stricter limits work too. 0 = one request.
+const UPLOAD_CHUNK = envMb('UPLOAD_CHUNK_MB', 90);
 const PUBLIC = path.join(ROOT, 'public');
 const TST_URL = (process.env.TST_URL || 'https://tabstationtoo.github.io/TabStationToo/').replace(/\/?$/, '/');
 const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), tst: path.join(DATA, 'tst'), incoming: path.join(DATA, 'incoming') };
@@ -57,6 +60,21 @@ async function readBody(req, limit = 64 << 20) {
   const chunks = []; let n = 0;
   for await (const c of req) { n += c.length; if (n > limit) throw Object.assign(new Error('Body too large'), { code: 413 }); chunks.push(c); }
   return Buffer.concat(chunks);
+}
+
+// One piece of an upload sent in pieces (?offset=<byte>&total=<size>; without them the body is the whole
+// file). The piece is written at `offset` and anything after it from a failed attempt is dropped, so
+// retrying a piece is safe. Returns { size, done } once the piece is stored in `tmp`.
+async function receivePiece(req, url, tmp) {
+  const offset = +(url.searchParams.get('offset') || 0);
+  const total = url.searchParams.has('total') ? +url.searchParams.get('total') : null;
+  let size = 0; try { size = (await stat(tmp)).size; } catch {}
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > size) throw Object.assign(new Error(`Piece at byte ${offset} does not follow the ${size} bytes received`), { code: 409 });
+  const fh = await open(tmp, offset === 0 ? 'w' : 'r+');
+  try { await fh.truncate(offset); } catch (e) { await fh.close(); throw e; }
+  await pipeline(req, fh.createWriteStream({ start: offset })); // closes the handle
+  size = (await stat(tmp)).size;
+  return { size, done: total === null || size >= total };
 }
 
 async function serveFile(req, res, file, { type, cache = 'no-cache', downloadName } = {}) {
@@ -270,7 +288,7 @@ async function handle(req, res) {
   if (p === '/api/ps2/cards/info' && M === 'GET') return send(res, 200, db.ps2Cards || { version: 0 });
 
   if (p === '/api/info' && M === 'GET') {
-    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), downloadChunk: DOWNLOAD_CHUNK });
+    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), downloadChunk: DOWNLOAD_CHUNK, uploadChunk: UPLOAD_CHUNK });
   }
 
   // sizes of the emulator files the browser would need for a platform
@@ -300,9 +318,9 @@ async function handle(req, res) {
     const dir = path.join(DIRS.incoming, batch);
     await mkdir(dir, { recursive: true });
     const tmp = path.join(dir, '.' + name + '.part');
-    try { await pipeline(req, createWriteStream(tmp)); } catch (e) { await rm(tmp, { force: true }); throw e; }
-    await rename(tmp, path.join(dir, name));
-    return send(res, 200, { ok: true });
+    const r = await receivePiece(req, url, tmp); // a failed piece is resent; finalize ignores leftover .part files
+    if (r.done) await rename(tmp, path.join(dir, name));
+    return send(res, 200, { ok: true, ...r });
   }
   if (p === '/api/upload/finalize' && M === 'POST') {
     const batch = (url.searchParams.get('batch') || '').replace(/[^\w-]/g, '');
@@ -357,8 +375,10 @@ async function handle(req, res) {
       const f = path.join(saveDir, `state-${slot}.${shot ? 'png' : 'bin'}`);
       if (M === 'GET') return serveFile(req, res, f, { type: shot ? 'image/png' : 'application/octet-stream' });
       if (M === 'PUT') {
-        const body = await readBody(req, 256 << 20);
-        await mkdir(saveDir, { recursive: true }); await writeFile(f + '.tmp', body); await rename(f + '.tmp', f);
+        await mkdir(saveDir, { recursive: true });
+        const r = await receivePiece(req, url, f + '.part'); // may arrive in pieces (see receivePiece)
+        if (!r.done) return send(res, 200, { ok: true, ...r });
+        await rename(f + '.part', f);
         if (!shot) { g.stateUpdated = Date.now(); await saveDb(); }
         return send(res, 200, { ok: true });
       }
@@ -387,8 +407,12 @@ async function handle(req, res) {
     if (M === 'PUT') {
       if (!PLATFORMS[plat].bios) return fail(res, 400, `${PLATFORMS[plat].name} does not use a BIOS`);
       const name = safeName(url.searchParams.get('name'));
+      // received next to the folder, so a failed upload leaves the current BIOS in place
+      const tmp = path.join(DIRS.bios, `.${plat}.part`);
+      const r = await receivePiece(req, url, tmp);
+      if (!r.done) return send(res, 200, { ok: true, ...r });
       await rm(dir, { recursive: true, force: true }); await mkdir(dir, { recursive: true });
-      await pipeline(req, createWriteStream(path.join(dir, name)));
+      await rename(tmp, path.join(dir, name));
       const st = await stat(path.join(dir, name));
       db.bios[plat] = { file: name, size: st.size, mtime: Math.round(st.mtimeMs) }; await saveDb();
       return send(res, 200, db.bios[plat]);

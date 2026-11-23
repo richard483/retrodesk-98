@@ -47,11 +47,9 @@ export async function remove(cacheName, url) {
 // limit: Cloudflare Tunnel, for example, will not pass a single response over 512 MB. The piece size comes
 // from the server (DOWNLOAD_CHUNK_MB, default 300; 0 = one request). A piece that fails is retried from
 // the byte where it stopped, so a dropped connection costs at most one retry, not the whole download.
-let chunkCfg;
-export function chunkSize() {
-  chunkCfg ??= fetch('/api/info').then((r) => r.json()).then((i) => i.downloadChunk ?? 300 * 2 ** 20).catch(() => 300 * 2 ** 20);
-  return chunkCfg;
-}
+let infoP;
+const info = () => (infoP ??= fetch('/api/info').then((r) => r.json()).catch(() => ({})));
+export const chunkSize = async () => (await info()).downloadChunk ?? 300 * 2 ** 20;
 
 async function fetchPiece(url, start, end, signal) {
   for (let attempt = 1; ; attempt++) {
@@ -147,6 +145,60 @@ export async function saveToDisk(url, filename, { onProgress, signal } = {}) {
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   return true;
+}
+
+// Uploads go the same way in reverse: pieces of at most UPLOAD_CHUNK_MB (default 90, under Cloudflare's 100 MB
+// request limit). A proxy with a lower limit answers 413; the piece is then halved and sent again, down to
+// 256 KB, and the size that worked is remembered for this browser.
+const MIN_PIECE = 256 << 10, PIECE_KEY = 'rd-upload-piece';
+export class UploadError extends Error {}
+
+function putPiece(url, body, onProgress) {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.upload.onprogress = (e) => onProgress(e.loaded);
+    x.onload = () => resolve({ status: x.status, text: x.responseText });
+    x.onerror = x.ontimeout = () => resolve({ status: 0, text: '' });
+    x.send(body);
+  });
+}
+
+const why = (r) => {
+  let msg = ''; try { msg = JSON.parse(r.text).error || ''; } catch {}
+  if (r.status === 413) return 'HTTP 413 Request Entity Too Large: a proxy between this browser and the RetroDesk server rejected the upload, even in 256 KB pieces. Raise its request size limit (nginx: client_max_body_size, for example 100m).';
+  if (r.status === 0) return 'The connection to the server was lost (network error).';
+  return `The server answered ${r.status}${msg ? ': ' + msg : ''}.`;
+};
+
+// PUT a File to url (which already has its query string) in pieces. onProgress(sentBytes, totalBytes).
+export async function putFile(url, file, { onProgress } = {}) {
+  const cfg = (await info()).uploadChunk ?? 90 * 2 ** 20;
+  let learned = 0; try { learned = +localStorage.getItem(PIECE_KEY) || 0; } catch {}
+  let piece = cfg > 0 ? Math.max(MIN_PIECE, learned ? Math.min(learned, cfg) : cfg) : Infinity;
+  const total = file.size, sep = url.includes('?') ? '&' : '?';
+  let pos = 0, fails = 0, result = null;
+  do {
+    const end = Math.min(total, pos + piece);
+    const r = await putPiece(`${url}${sep}offset=${pos}&total=${total}`, file.slice(pos, end), (l) => onProgress?.(pos + l, total));
+    if (r.status >= 200 && r.status < 300) {
+      try { result = JSON.parse(r.text); } catch { result = null; }
+      pos = end; fails = 0; continue;
+    }
+    if (r.status === 413 && piece > MIN_PIECE && end - pos > MIN_PIECE) { // too big for a proxy: smaller pieces
+      piece = Math.max(MIN_PIECE, Math.floor(Math.min(piece, end - pos) / 2));
+      try { localStorage.setItem(PIECE_KEY, piece); } catch {}
+      continue;
+    }
+    if ((r.status === 0 || r.status >= 500) && ++fails < 4) {
+      // some proxies drop the connection instead of answering 413, so a lost piece is also resent smaller
+      if (r.status === 0) piece = Math.max(MIN_PIECE, Math.floor(Math.min(piece, end - pos) / 2));
+      await new Promise((ok) => setTimeout(ok, 1000 * fails)); continue;
+    }
+    throw new UploadError(why(r));
+  } while (pos < total);
+  onProgress?.(total, total);
+  return result;
 }
 
 export async function gameFile(game) {

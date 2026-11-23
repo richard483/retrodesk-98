@@ -1,5 +1,5 @@
 // Runs EmulatorJS for one game and syncs battery saves + save states with the server.
-import { gameFile, download, fmt } from '/store.js';
+import { gameFile, download, fmt, putFile } from '/store.js';
 
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
@@ -10,7 +10,7 @@ const toastEl = document.getElementById('toast');
 const post = (msg) => parent !== window && parent.postMessage({ ...msg, gameId: id }, location.origin);
 const setStatus = (t) => { statusEl.textContent = t; statusEl.style.display = t ? 'flex' : 'none'; };
 let toastTimer;
-function toast(t) { toastEl.textContent = t; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => (toastEl.style.display = 'none'), 2500); }
+function toast(t, ms = 2500) { toastEl.textContent = t; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => (toastEl.style.display = 'none'), ms); }
 
 const api = (p, o) => fetch(`/api/games/${id}${p}`, o);
 let startedAt = 0, lastSaveSig = '', emu, gm;
@@ -30,8 +30,9 @@ async function uploadSave(data) {
 }
 
 async function putState(slot, state, shot) {
-  await api(`/states/${slot}`, { method: 'PUT', body: state });
-  if (shot && (shot.size || shot.length)) await api(`/states/${slot}/shot`, { method: 'PUT', body: shot }).catch(() => {});
+  try { await putFile(`/api/games/${id}/states/${slot}`, new Blob([state])); }
+  catch (e) { throw new Error('Saving the state to the server failed. ' + e.message); }
+  if (shot && (shot.size || shot.length)) await putFile(`/api/games/${id}/states/${slot}/shot`, new Blob([shot])).catch(() => {});
   post({ type: 'saved', what: 'state', slot });
 }
 
@@ -101,7 +102,7 @@ async function main() {
     EJS_disableAutoLang: false,        // (sic) EmulatorJS only skips auto-language when this is === false
     EJS_defaultOptions: { 'save-state-location': 'download', ...(plat.options || {}) },
     EJS_onSaveState: async ({ state }) => {
-      try { await putState(currentSlot(), state, await screenshot()); toast(`State saved to server (slot ${currentSlot()})`); } catch (e) { toast('Save failed: ' + e.message); }
+      try { await putState(currentSlot(), state, await screenshot()); toast(`State saved to server (slot ${currentSlot()})`); } catch (e) { toast(e.message, 8000); }
     },
     EJS_onLoadState: () => loadState(currentSlot()),
     EJS_onGameStart: async () => {
@@ -213,7 +214,7 @@ addEventListener('message', async (e) => {
       if (startedAt) await api('', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ played: true, seconds: Math.round((Date.now() - startedAt) / 1000) }) });
       post({ type: 'exited' });
     }
-  } catch (err) { toast(err.message); if (cmd === 'exit') post({ type: 'exited' }); }
+  } catch (err) { toast(err.message, 8000); if (cmd === 'exit') post({ type: 'exited' }); }
 });
 addEventListener('pagehide', () => { try { gm?.saveSaveFiles(); const d = gm?.getSaveFile(false); if (d?.length && sig(d) !== lastSaveSig) navigator.sendBeacon?.(`/api/games/${id}/save`, d); } catch {} });
 

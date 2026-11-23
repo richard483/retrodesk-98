@@ -363,17 +363,6 @@ function dropZone(el) {
 }
 dropZone($('#desktop'));
 
-function xhrPut(url, file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const x = new XMLHttpRequest();
-    x.open('PUT', url);
-    x.upload.onprogress = (e) => onProgress(e.loaded, e.total);
-    x.onload = () => (x.status < 300 ? resolve() : reject(new Error(x.responseText || x.status)));
-    x.onerror = () => reject(new Error('Network error'));
-    x.send(file);
-  });
-}
-
 async function upload(files) {
   const total = files.reduce((a, f) => a + f.size, 0);
   const body = h(`<div style="width:380px"><div class="row">${icon('upload')}<div style="flex:1"><p class="t">Uploading ${files.length} file(s), ${fmt(total)}…</p><p class="f muted"></p>
@@ -384,11 +373,11 @@ async function upload(files) {
   try {
     for (const f of files) {
       $('.f', body).textContent = f.name;
-      await xhrPut(`/api/upload?batch=${batch}&name=${encodeURIComponent(f.name)}`, f, (l) => {
+      await store.putFile(`/api/upload?batch=${batch}&name=${encodeURIComponent(f.name)}`, f, { onProgress: (l) => {
         const sent = done + l, pct = (sent / total) * 100, rate = sent / ((Date.now() - t0) / 1000 || 1);
         $('.progress-indicator-bar', body).style.width = pct + '%';
         $('.n', body).textContent = `${fmt(sent)} of ${fmt(total)} (${fmt(rate)}/s)`;
-      });
+      } });
       done += f.size;
     }
     $('.t', body).textContent = 'Detecting consoles…';
@@ -734,10 +723,28 @@ async function openBios() {
       ${plats.map(row).join('')}</tbody></table>`;
     root.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => {
       const pk = $('#biospicker');
-      pk.onchange = async () => { const f = pk.files[0]; pk.value = ''; if (!f) return; await fetch(`/api/bios/${b.dataset.up}?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f }); render(); };
+      pk.onchange = async () => {
+        const f = pk.files[0]; pk.value = ''; if (!f) return;
+        const plat = b.dataset.up, cell = b.closest('tr').children[3], name = INFO.platforms[plat]?.name || plat;
+        root.querySelectorAll('button').forEach((x) => (x.disabled = true));
+        cell.innerHTML = `<span class="muted">Uploading ${esc(f.name)}…</span>`;
+        try {
+          await store.putFile(`/api/bios/${plat}?name=${encodeURIComponent(f.name)}`, f, {
+            onProgress: (l, t) => (cell.innerHTML = `<span class="muted">Uploading… ${t ? Math.floor((l / t) * 100) : 100}%</span>`),
+          });
+        } catch (e) {
+          await render();
+          msgbox(`The ${name} BIOS (${f.name}, ${fmt(f.size)}) was not uploaded.\n\n${e.message}${have[plat] ? `\n\nThe BIOS already on the server (${have[plat].file}) was kept.` : ''}`, { title: 'BIOS upload failed', ic: 'error' });
+          return;
+        }
+        render();
+      };
       pk.click();
     }));
-    root.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { await api(`/bios/${b.dataset.rm}`, { method: 'DELETE' }); render(); }));
+    root.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => {
+      try { await api(`/bios/${b.dataset.rm}`, { method: 'DELETE' }); } catch (e) { msgbox('The BIOS was not removed: ' + e.message, { ic: 'error' }); }
+      render();
+    }));
   }
   render();
 }
