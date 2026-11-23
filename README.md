@@ -18,6 +18,8 @@ open http://localhost:8098
 | `DOWNLOAD_CHUNK_MB` | `300` | browsers download big files in pieces of this size (`0` = one request). See [Behind a proxy or tunnel](#behind-a-proxy-or-tunnel) |
 | `UPLOAD_CHUNK_MB` | `90` | largest piece browsers upload in one request (games, BIOS, save states); smaller automatically when a proxy answers 413 (`0` = one request) |
 | `TST_URL`      | `https://tabstationtoo.github.io/TabStationToo/` | where the PS2 emulator (TabStationToo) is copied from |
+| `PSP_ENGINE`   | `ppsspp`  | `ppsspp` = standalone PPSSPP (see [PSP](#psp)); `ejs` = EmulatorJS's libretro PPSSPP core, as before |
+| `PPSSPP_URL`   | `https://root-hunter.github.io/ppsspp-web/` | where the PSP emulator build is copied from |
 
 ### Docker
 
@@ -37,7 +39,7 @@ docker run -d --name retrodesk98 -p 8098:8098 -v retrodesk-data:/data --restart 
 - To use a host folder instead of a named volume, run `mkdir -p data` and mount `-v ./data:/data`. The container
   runs as uid 1000, so the folder must be writable by that user.
 - Pass settings with `-e`, for example `-e EMU_PASSWORD=secret`. The env vars are listed in the table above.
-- The first time each console is played, the container downloads its core from the EmulatorJS CDN, so it needs outbound internet.
+- The first time each console is played, the container downloads its emulator (from the EmulatorJS CDN, or GitHub Pages for PSP and PS2), so it needs outbound internet.
 - For phones or other machines, put HTTPS in front of it (see [Mobile](#mobile-phones--tablets)).
 
 ## What came from the community and what is new
@@ -45,6 +47,7 @@ docker run -d --name retrodesk98 -p 8098:8098 -v retrodesk-data:/data --restart 
 | Piece | Source |
 |---|---|
 | Emulator cores and player | [EmulatorJS](https://emulatorjs.org) (libretro cores compiled to WebAssembly). The server downloads each file from the EmulatorJS CDN **once**, then serves it from `data/ejs/`. |
+| PSP emulator | [PPSSPP](https://github.com/hrydgard/ppsspp) (GPL-2.0-or-later), the standalone emulator compiled to WebAssembly by the community fork [root-hunter/ppsspp-wasm](https://github.com/root-hunter/ppsspp-wasm). The server copies one build into `data/ppsspp/<revision>/`. |
 | PS2 emulator | [TabStationToo](https://github.com/TabStationToo/TabStationToo) (PCSX2 compiled to WebAssembly, GPL-3.0). The server copies one build of its site into `data/tst/<build>/` and serves it from there. |
 | Win98 look | [98.css](https://jdan.github.io/98.css/), vendored in `public/vendor/98css` (MIT) |
 | Console detection, library, save sync, browser storage manager, Win98 desktop shell | written for this project |
@@ -58,7 +61,7 @@ but it is much heavier (Python, MariaDB, Redis) and has no per-game control over
 |---|---|---|
 | NES, SNES, N64, GB/GBC, GBA, NDS, Virtual Boy | ✅ | fceumm, snes9x, mupen64plus_next, gambatte, mgba, melonDS, beetle_vb |
 | PlayStation 1 | ✅ | pcsx_rearmed (BIOS optional, recommended) |
-| PSP | ✅ (needs WebGL2 + cross-origin isolation, which the server provides) | PPSSPP |
+| PSP | ✅ (needs WebGL2 + cross-origin isolation, which the server provides) | PPSSPP 1.20 standalone (WebAssembly); see [PSP](#psp) |
 | Sega MS/GG/Genesis/32X/CD/Saturn, PC Engine, NGP, WonderSwan, Atari 2600/7800/Lynx/Jaguar, 3DO, Arcade | ✅ | various |
 | PlayStation 2 | ⚠️ experimental (desktop Chrome/Edge, BIOS required) | TabStationToo (PCSX2). See [PlayStation 2](#playstation-2) |
 | GameCube / Wii | ❌ stored only | Dolphin has only unreleased WebAssembly demos |
@@ -92,6 +95,32 @@ size, lets you delete each one, and can request *persistent* storage so the brow
 **Saves.** Battery saves (SRAM) upload every 30 s, on exit and on tab close. Save states (slots 1–9,
 with screenshots) are stored on the server. When you close a game window an auto-save state is written,
 and the next launch offers to resume from it.
+
+## PSP
+
+PSP games run on **standalone PPSSPP** compiled to WebAssembly, not on EmulatorJS's libretro core. It is a newer
+PPSSPP (1.20), and its sound goes through PPSSPP's own mixer and an AudioWorklet instead of RetroArch's web audio
+driver, which is where the libretro core's crackling came from. Nothing needs setting up: it is the default.
+
+- **First PSP game**: the server copies the emulator build (about 38 MB: `PPSSPPSDL.js`, `.wasm`, `.data`) from
+  `PPSSPP_URL` into `data/ppsspp/<revision>/`. After that nothing is fetched from the internet, and the browser caches
+  the files like the other cores. **View → Check for emulator update…** fetches a newer build when there is one.
+- **Game saves** (the PSP's `SAVEDATA` folder) are restored from the server before the game starts and sent back
+  10 seconds after the game writes them, and when the game closes. Saves made with the old EmulatorJS core were only
+  kept in that browser; the first time a game runs here without server saves, its folders are copied from there.
+- **Save states** use RetroDesk's slots 1–9 and the auto-save, with resume on the next launch. RetroDesk makes them
+  with PPSSPP's own Save State / Load State (mapped to F2 / F4), so they are PPSSPP's `.ppst` files, screenshot included.
+  States made with the EmulatorJS core do not load in standalone PPSSPP.
+- **PPSSPP's menu** (View → PPSSPP menu, or Esc, or Home on a controller) has its graphics, sound and control
+  settings. They are stored on the server and apply to every PSP game. **Game → Controls / remap buttons…** opens it.
+- **Touch screens** get PPSSPP's own on-screen controls. View → Show FPS turns on PPSSPP's FPS and speed counter;
+  both apply from the next start.
+- **Memory**: the whole disc image is loaded into memory, as it was with EmulatorJS, so 1.5 GB+ ISOs need a 64-bit
+  browser with plenty of RAM. CSO files are smaller and work too.
+- **About the build**: PPSSPP has no official browser version. The build comes from the community fork
+  [root-hunter/ppsspp-wasm](https://github.com/root-hunter/ppsspp-wasm) (same GPL-2.0-or-later license), which RetroDesk
+  serves unchanged with its own page (`public/psp.html`). The AudioWorklet shim in `public/vendor/ppsspp-web/` comes
+  from its web shell. Set `PSP_ENGINE=ejs` to go back to the EmulatorJS core for every PSP game.
 
 ## PlayStation 2
 
@@ -182,8 +211,11 @@ What RetroDesk does about it:
   thread. 4.3 fixes hardware rendering, and EmulatorJS's notes call PSP "significantly more playable". To go back,
   set `EJS_VERSION=4.2.3`. Emulator files are cached per version, so switching is clean. Save states made by one
   version's cores may not load in the other; battery saves are not affected.
-- **PSP** is pinned to PPSSPP's IR interpreter, its fastest CPU mode in a browser (a browser cannot run its JIT).
-- **PSP runs with VSync off, so the sound doesn't crackle.** EmulatorJS 4.3's sound driver queues only about 20 ms of
+- **PSP runs on standalone PPSSPP** (see [PSP](#psp)), with the build author's timing and audio settings. Like every
+  browser build it uses PPSSPP's IR interpreter, because a browser cannot run its JIT. The next two points apply only
+  with `PSP_ENGINE=ejs`.
+- **With the EmulatorJS core, PSP is pinned to the IR interpreter** so a stray setting can't make it slower.
+- **With the EmulatorJS core, PSP runs with VSync off, so the sound doesn't crackle.** EmulatorJS 4.3's sound driver queues only about 20 ms of
   sound when frames are timed by the display. Each slow PSP frame is then a dropped frame and a gap in the sound.
   With VSync off, RetroArch times frames by the sound instead: it keeps about 64 ms queued and catches up after a slow
   frame. In a test with 60 ms stalls twice a second, gaps went from 15 in 8 seconds to none, and speed from 55.8 to
@@ -200,9 +232,10 @@ What you can check on your side:
 - **Windows power mode**: set *Best performance* (Settings → System → Power).
 - **Hardware acceleration**: `chrome://gpu` should say *WebGL2: Hardware accelerated*. If it says software,
   turn on *Settings → System → Use graphics acceleration*.
-- For PSP, keep *Internal resolution* at 1× (480×272) in the emulator menu. Each step up costs GPU time.
+- For PSP, a lower *Rendering resolution* in PPSSPP's menu (Settings → Graphics) costs less GPU time.
 - **View → Show FPS** in a game window shows how many frames the emulator really runs per second. Green (about 60)
-  means full speed; anything lower means the game itself is too slow on this machine, not just the sound.
+  means full speed; anything lower means the game itself is too slow on this machine, not just the sound. For PSP,
+  PPSSPP shows its own counter, with speed in %, from the next start.
 
 ## Behind a proxy or tunnel
 
@@ -272,10 +305,13 @@ server.js            HTTP server, API, EmulatorJS mirror (zero dependencies)
 lib/platforms.js     console table: core, BIOS, extensions, playability
 lib/detect.js        console auto-detection (also looks inside CSO/ZSO, reads CHD metadata)
 lib/tst.js           TabStationToo (PS2) mirror: download, pin, update, serve
+lib/ppsspp.js        PPSSPP (PSP) build mirror: download, pin, update, serve
 public/              Win98 frontend (vanilla JS, no build step)
   app.js             desktop, windows, library, upload, play dialog, storage/BIOS managers
   play.html/js       emulator page (runs inside a game window), save sync
   ps2.html/js        PS2 page: hosts TabStationToo, state slots, memory card sync
+  psp.html/js        PSP page: runs PPSSPP, state slots, SAVEDATA + settings sync
+  vendor/ppsspp-web/ AudioWorklet shim from PPSSPP Web (GPL-2.0-or-later)
   tst-embed.css      compact game-window layout for TabStationToo
   store.js, sw.js    browser storage + service worker
   gamepad.js         controller polling for desktop navigation
@@ -290,7 +326,7 @@ LICENSE              GNU GPL v3
 
 - Use `http://localhost` or HTTPS. Service workers and cross-origin isolation (needed for PSP) only work in a
   secure context. To reach it from another device, put it behind HTTPS, for example with Caddy or Tailscale.
-- EmulatorJS loads the whole game into RAM, so very large PSP ISOs (1.5 GB+) need plenty of memory.
+- EmulatorJS and PPSSPP load the whole game into RAM, so very large PSP ISOs (1.5 GB+) need plenty of memory.
 - Only play games you own, and use BIOS dumps from your own consoles.
 
 ## License
@@ -300,7 +336,8 @@ RetroDesk 98 is free software: you can redistribute it and/or modify it under th
 
 Copyright (C) 2026 nephren and contributors.
 
-Why the GPL: RetroDesk runs inside the same pages as EmulatorJS and TabStationToo, both GPL-3.0. It calls into
+Why the GPL: RetroDesk runs inside the same pages as EmulatorJS and TabStationToo, both GPL-3.0, and PPSSPP
+(GPL-2.0-or-later, so usable under version 3). It calls into
 EmulatorJS's code and adds a script and stylesheet to TabStationToo's page, which it also redistributes from its own
 server. Using the same license keeps the combination clearly allowed.
 
@@ -310,6 +347,8 @@ server. Using the same license keeps the combination clearly allowed.
 |---|---|---|
 | [98.css](https://github.com/jdan/98.css) and its fonts | MIT (`public/vendor/98css/LICENSE`) | included in this repository |
 | [EmulatorJS](https://github.com/EmulatorJS/EmulatorJS) and its libretro cores | GPL-3.0; each core has its own license, shipped inside the core | downloaded by the server at runtime into `data/ejs/`, not included here |
+| [PPSSPP](https://github.com/hrydgard/ppsspp), WebAssembly build by [root-hunter/ppsspp-wasm](https://github.com/root-hunter/ppsspp-wasm) | GPL-2.0-or-later | downloaded by the server at runtime into `data/ppsspp/`, not included here |
+| AudioWorklet shim from [PPSSPP Web](https://github.com/root-hunter/ppsspp-web) | GPL-2.0-or-later | included in `public/vendor/ppsspp-web/` |
 | [TabStationToo](https://github.com/TabStationToo/TabStationToo) (PCSX2 for the web) | GPL-3.0-or-later; its own notices are kept with the copy | downloaded by the server at runtime into `data/tst/`, not included here |
 
 No games or BIOS files are included or downloaded. Use only games and BIOS dumps you own.

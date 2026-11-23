@@ -28,7 +28,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin || e.request.method !== 'GET') return;
   const isTst = url.pathname.startsWith('/tst/') && !/\/(index\.html)?$/.test(url.pathname); // the PS2 emulator (build id in the path)
-  const isSys = isTst || url.pathname.startsWith('/ejs/') || url.pathname.startsWith('/api/bios/') || url.pathname === '/data/cores/ppsspp-assets.zip';
+  const isSys = isTst || url.pathname.startsWith('/ppsspp/') || url.pathname.startsWith('/ejs/') || url.pathname.startsWith('/api/bios/') || url.pathname === '/data/cores/ppsspp-assets.zip';
   const isRom = /^\/api\/games\/\w+\/rom\//.test(url.pathname) && !url.searchParams.has('dl');
   if (!isSys && !isRom) return;
   e.respondWith((async () => {

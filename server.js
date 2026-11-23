@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { PLATFORMS, RUNTIME_FILES, coreFiles } from './lib/platforms.js';
 import { detectFile } from './lib/detect.js';
 import { createTstMirror } from './lib/tst.js';
+import { createPpssppMirror } from './lib/ppsspp.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 8098);
@@ -31,7 +32,10 @@ const DOWNLOAD_CHUNK = envMb('DOWNLOAD_CHUNK_MB', 300);
 const UPLOAD_CHUNK = envMb('UPLOAD_CHUNK_MB', 90);
 const PUBLIC = path.join(ROOT, 'public');
 const TST_URL = (process.env.TST_URL || 'https://tabstationtoo.github.io/TabStationToo/').replace(/\/?$/, '/');
-const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), tst: path.join(DATA, 'tst'), incoming: path.join(DATA, 'incoming') };
+// PSP: standalone PPSSPP (default) or EmulatorJS's libretro core (PSP_ENGINE=ejs).
+const PPSSPP_URL = (process.env.PPSSPP_URL || 'https://root-hunter.github.io/ppsspp-web/').replace(/\/?$/, '/');
+if ((process.env.PSP_ENGINE || '').toLowerCase() === 'ejs') delete PLATFORMS.psp.engine;
+const DIRS = { roms: path.join(DATA, 'roms'), saves: path.join(DATA, 'saves'), bios: path.join(DATA, 'bios'), ejs: path.join(DATA, 'ejs', EJS_VERSION), tst: path.join(DATA, 'tst'), ppsspp: path.join(DATA, 'ppsspp'), incoming: path.join(DATA, 'incoming') };
 for (const d of Object.values(DIRS)) await mkdir(d, { recursive: true });
 
 // ---------------- tiny JSON database ----------------
@@ -131,6 +135,7 @@ async function ejsSize(rel) {
 
 // ---------------- TabStationToo (PS2) mirror ----------------
 const tst = await createTstMirror({ dir: DIRS.tst, source: TST_URL });
+const ppsspp = await createPpssppMirror({ dir: DIRS.ppsspp, source: PPSSPP_URL });
 
 // ---------------- library ----------------
 function gameView(g) {
@@ -263,6 +268,10 @@ async function handle(req, res) {
     }
     return serveFile(req, res, await tst.file(build, rel), { cache: 'public, max-age=31536000, immutable' });
   }
+  // PPSSPP (PSP), one pinned build per revision
+  if ((m = p.match(/^\/ppsspp\/([0-9a-f]{12,64})\/([\w.-]+)$/))) return serveFile(req, res, await ppsspp.file(m[1], m[2]), { cache: 'public, max-age=31536000, immutable' });
+  if (p === '/api/psp/emulator' && M === 'GET') return send(res, 200, url.searchParams.has('check') ? await ppsspp.check() : ppsspp.info());
+  if (p === '/api/psp/emulator/update' && M === 'POST') return send(res, 200, await ppsspp.install());
   if (p === '/api/ps2/emulator' && M === 'GET') return send(res, 200, url.searchParams.has('check') ? await tst.check() : tst.info());
   if (p === '/api/ps2/emulator/update' && M === 'POST') return send(res, 200, await tst.install());
 
@@ -288,7 +297,7 @@ async function handle(req, res) {
   if (p === '/api/ps2/cards/info' && M === 'GET') return send(res, 200, db.ps2Cards || { version: 0 });
 
   if (p === '/api/info' && M === 'GET') {
-    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), downloadChunk: DOWNLOAD_CHUNK, uploadChunk: UPLOAD_CHUNK });
+    return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), ppsspp: ppsspp.info(), downloadChunk: DOWNLOAD_CHUNK, uploadChunk: UPLOAD_CHUNK });
   }
 
   // sizes of the emulator files the browser would need for a platform
@@ -298,6 +307,10 @@ async function handle(req, res) {
     if (PLATFORMS[m[1]]?.engine === 'tst') {
       await tst.ensure(); // first PS2 game: the server copies the emulator site once (~17 MB)
       return send(res, 200, { engine: 'tst', build: tst.build, core: tst.manifest(), runtime: [], bios });
+    }
+    if (PLATFORMS[m[1]]?.engine === 'ppsspp') {
+      await ppsspp.ensure(); // first PSP game: the server copies the emulator build once (~40 MB)
+      return send(res, 200, { engine: 'ppsspp', build: ppsspp.build, core: ppsspp.manifest(), runtime: [], bios });
     }
     const opts = { webgl2: url.searchParams.get('webgl2') !== '0', threads: url.searchParams.get('threads') === '1' };
     const pageRelative = EJS_VERSION.startsWith('4.3') ? new Set(['cores/ppsspp-assets.zip']) : new Set(); // see /data/ route

@@ -410,14 +410,15 @@ async function requirements(g) {
   const p = INFO.platforms[g.platform];
   const threads = !!p.threads;
   const files = await api(`/platforms/${g.platform}/files?webgl2=${store.webgl2() ? 1 : 0}&threads=${threads ? 1 : 0}`);
-  const sys = files.engine === 'tst'
-    ? files.core.map((f) => ({ ...f, group: f.core ? 'core' : 'runtime' }))   // PS2: TabStationToo's module + its page
+  const sys = files.engine === 'tst' || files.engine === 'ppsspp'
+    ? files.core.map((f) => ({ ...f, group: f.core ? 'core' : 'runtime' }))   // PS2: TabStationToo's module + its page; PSP: PPSSPP
     : [...files.runtime.map((f) => ({ ...f, group: 'runtime' })), ...files.core.map((f) => ({ ...f, group: 'core' }))].map((f) => ({ ...f, url: f.url || `/ejs/${INFO.ejsVersion}/${f.path}` }));
   if (files.bios) sys.push({ path: files.bios.file, url: files.bios.url, size: files.bios.size, group: 'bios' });
   await Promise.all(sys.map(async (f) => { f.cached = (await store.cachedSize(store.SYS, f.url)) != null; }));
   const game = { url: g.romUrl, size: g.size, cached: g.inBrowser };
   const est = await store.estimate();
-  if (files.build) INFO.tst = { ...INFO.tst, installed: true, build: files.build };
+  if (files.build && files.engine === 'tst') INFO.tst = { ...INFO.tst, installed: true, build: files.build };
+  if (files.build && files.engine === 'ppsspp') INFO.ppsspp = { ...INFO.ppsspp, installed: true, build: files.build };
   return { p, sys, game, est, threads, bios: files.bios, engine: files.engine || 'ejs', build: files.build };
 }
 
@@ -435,6 +436,7 @@ async function preparePlay(g) {
   const R = await requirements(g);
   const groups = R.engine === 'tst'
     ? { core: 'PS2 emulator: TabStationToo (PCSX2)', runtime: 'TabStationToo page (interface, fonts, title list)', bios: 'BIOS' }
+    : R.engine === 'ppsspp' ? { core: 'PSP emulator: PPSSPP (WebAssembly)' }
     : { runtime: 'EmulatorJS runtime (shared)', core: `Emulator core: ${p.core}`, bios: 'BIOS' };
   const sum = (arr) => arr.reduce((a, f) => a + (f.size || 0), 0);
   const sysNeed = R.sys.filter((f) => !f.cached);
@@ -449,7 +451,7 @@ async function preparePlay(g) {
   const memNote = R.engine === 'tst'
     ? `<p class="muted">The PS2 emulator reads the disc in pieces as the game needs them, so “Play without keeping” streams from your server and loads nothing big into memory.</p>
        <p class="warn">${esc(p.note)}${navigator.gpu ? '' : ' This browser has no WebGPU, so the picture is drawn in software (slower).'}</p>`
-    : R.game.size > 1.5 * 2 ** 30 ? `<p class="warn">Note: EmulatorJS loads the whole game into RAM (${fmt(R.game.size)}). Large games need a 64-bit browser with plenty of memory.</p>` : '';
+    : R.game.size > 1.5 * 2 ** 30 ? `<p class="warn">Note: ${R.engine === 'ppsspp' ? 'PPSSPP' : 'EmulatorJS'} loads the whole game into RAM (${fmt(R.game.size)}). Large games need a 64-bit browser with plenty of memory.</p>` : '';
   const body = h(`<div style="width:540px">
     <div class="row">${icon(platformIcon(g.platform))}<div><b>${esc(g.title)}</b><br><span class="muted">${esc(p.name)} · ${esc(g.file)}</span></div></div>
     <fieldset style="margin-top:10px"><legend>Data this browser needs</legend>
@@ -549,8 +551,9 @@ async function cacheGameDialog(g) {
 function launch(g, mode, resume) {
   const id = 'game-' + g.id;
   if (wins.has(id)) return focusWin(wins.get(id));
-  const ps2 = INFO.platforms[g.platform]?.engine === 'tst';
-  const page = ps2 ? '/ps2.html' : '/play.html';
+  const engine = INFO.platforms[g.platform]?.engine;
+  const ps2 = engine === 'tst', psp = engine === 'ppsspp';
+  const page = ps2 ? '/ps2.html' : psp ? '/psp.html' : '/play.html';
   const frame = h(`<iframe allow="fullscreen; gamepad; autoplay; cross-origin-isolated" src="${page}?id=${g.id}&mode=${mode}${resume ? '&resume=1' : ''}"></iframe>`);
   const send = (msg) => frame.contentWindow.postMessage(msg, location.origin);
   let exiting = false;
@@ -579,7 +582,10 @@ function launch(g, mode, resume) {
             { label: 'Always show', check: pref === 'on', action: () => setV('on') },
             { label: 'Hide', check: pref === 'off', action: () => setV('off') }] },
           ...(touch ? [] : [{ label: '(on-screen controller is for touch screens)', disabled: true }]), '-',
-          { label: 'Show FPS', check: fps, action: () => frame.contentWindow.postMessage({ cmd: 'fps', on: !fps }, location.origin) }];
+          { label: 'Show FPS', check: fps, action: () => frame.contentWindow.postMessage({ cmd: 'fps', on: !fps }, location.origin) },
+          ...(psp ? ['-', { label: `PSP emulator: PPSSPP ${INFO.ppsspp?.build?.slice(0, 8) || ''}`, disabled: true },
+            { label: 'PPSSPP menu (settings, graphics)…', action: () => send({ cmd: 'menu' }) },
+            { label: 'Check for emulator update…', action: pspUpdate }] : [])];
       },
     },
     onClose: () => {
@@ -589,7 +595,7 @@ function launch(g, mode, resume) {
         const fin = () => { removeEventListener('message', onMsg); clearTimeout(t); resolve(true); refresh(); };
         const onMsg = (e) => { if (e.data?.type === 'exited' && e.data.gameId === g.id) fin(); };
         addEventListener('message', onMsg);
-        const t = setTimeout(fin, ps2 ? 25000 : 8000); // a PS2 state is tens of MB
+        const t = setTimeout(fin, ps2 || psp ? 25000 : 8000); // a PS2/PSP state is tens of MB
         frame.contentWindow.postMessage({ cmd: 'exit' }, location.origin);
       });
     },
@@ -621,6 +627,21 @@ async function ps2Update() {
   } catch (e) { msgbox('Update failed: ' + e.message, { ic: 'error' }); }
 }
 
+// PPSSPP's web build: the server keeps one build and can fetch the newest.
+async function pspUpdate() {
+  let c;
+  try { c = await api('/psp/emulator?check=1'); } catch (e) { return msgbox('Could not reach the PPSSPP build site: ' + e.message, { ic: 'error' }); }
+  if (!c.installed) return msgbox('The PSP emulator is downloaded the first time you start a PSP game.', { title: 'PSP emulator' });
+  if (!c.updateAvailable) return msgbox(`The PSP emulator is up to date.\n\nPPSSPP build ${c.build}, downloaded ${new Date(c.fetched).toLocaleString()}.`, { title: 'PSP emulator' });
+  if ((await msgbox(`A newer PPSSPP build is available (${c.latest}; you have ${c.build}).\n\nUpdate now? PSP games that are open keep running on the old build until you close them. Save states from an older build usually still load, but not always.`, { title: 'PSP emulator', buttons: ['Update', 'Cancel'] })) !== 'Update') return;
+  try {
+    const r = await api('/psp/emulator/update', { method: 'POST' });
+    INFO.ppsspp = r;
+    for (const f of await store.list(store.SYS)) if (f.path.startsWith('/ppsspp/') && !f.path.startsWith(`/ppsspp/${r.build}/`)) await store.remove(store.SYS, f.url);
+    msgbox(`Updated to PPSSPP build ${r.build}.`, { title: 'PSP emulator' });
+  } catch (e) { msgbox('Update failed: ' + e.message, { ic: 'error' }); }
+}
+
 // ======================= properties =======================
 async function properties(g) {
   if (!g) return;
@@ -635,7 +656,7 @@ async function properties(g) {
         <tr><td>File:</td><td>${esc(g.file)}</td></tr>${g.bundled ? `<tr><td>Contains:</td><td>${g.bundled.map(esc).join('<br>')}</td></tr>` : ''}
         <tr><td>Size:</td><td>${fmt(g.size)} (${g.size.toLocaleString()} bytes)</td></tr>
         <tr><td>In this browser:</td><td>${g.inBrowser ? 'Yes' : 'No'}</td></tr>
-        ${p.playable ? `<tr><td>Emulator:</td><td>${p.engine === 'tst' ? `TabStationToo ${esc(INFO.tst?.build || '(downloads on first play)')} (PCSX2, WebAssembly)` : `${esc(p.core)} (EmulatorJS ${esc(INFO.ejsVersion)})`}</td></tr>` : ''}
+        ${p.playable ? `<tr><td>Emulator:</td><td>${p.engine === 'tst' ? `TabStationToo ${esc(INFO.tst?.build || '(downloads on first play)')} (PCSX2, WebAssembly)` : p.engine === 'ppsspp' ? `PPSSPP ${esc(INFO.ppsspp?.build?.slice(0, 8) || '(downloads on first play)')} (WebAssembly)` : `${esc(p.core)} (EmulatorJS ${esc(INFO.ejsVersion)})`}</td></tr>` : ''}
         <tr><td>Added:</td><td>${new Date(g.added).toLocaleString()}</td></tr>
         <tr><td>Last played:</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleString() : 'Never'}</td></tr>
         <tr><td>Play time:</td><td>${Math.floor(g.playTime / 3600)}h ${Math.floor((g.playTime % 3600) / 60)}m</td></tr></table>
@@ -659,7 +680,7 @@ async function openStorage() {
     const [est, sys, games] = await Promise.all([store.estimate(), store.list(store.SYS), store.list(store.GAMES)]);
     const byGroup = {};
     for (const f of sys) {
-      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : f.path.startsWith('/tst/') ? 'PS2 emulator: TabStationToo ' + f.path.split('/')[2] : (CORE_RE.exec(f.path)?.[1] ? 'Core: ' + CORE_RE.exec(f.path)[1] : 'EmulatorJS runtime');
+      const name = f.path.startsWith('/api/bios/') ? 'BIOS: ' + f.path.split('/')[3] : f.path.startsWith('/tst/') ? 'PS2 emulator: TabStationToo ' + f.path.split('/')[2] : f.path.startsWith('/ppsspp/') ? 'PSP emulator: PPSSPP ' + f.path.split('/')[2].slice(0, 8) : (CORE_RE.exec(f.path)?.[1] ? 'Core: ' + CORE_RE.exec(f.path)[1] : 'EmulatorJS runtime');
       (byGroup[name] ||= []).push(f);
     }
     const sum = (a) => a.reduce((x, f) => x + f.size, 0);
@@ -933,9 +954,11 @@ watchGamepads({
 
 // ======================= boot =======================
 INFO = await api('/info');
-// Emulator files cached for another EmulatorJS release (or before versioned URLs) are never used again.
+// Emulator files cached for another EmulatorJS release (or before versioned URLs), or for an older PPSSPP build,
+// are never used again.
 store.list(store.SYS).then(async (files) => {
-  for (const f of files) if ((f.path.startsWith('/ejs/') && !f.path.startsWith(`/ejs/${INFO.ejsVersion}/`)) || (f.path.startsWith('/data/') && !INFO.ejsVersion.startsWith('4.3'))) await store.remove(store.SYS, f.url);
+  for (const f of files) if ((f.path.startsWith('/ejs/') && !f.path.startsWith(`/ejs/${INFO.ejsVersion}/`)) || (f.path.startsWith('/data/') && !INFO.ejsVersion.startsWith('4.3'))
+    || (f.path.startsWith('/ppsspp/') && INFO.ppsspp?.build && !f.path.startsWith(`/ppsspp/${INFO.ppsspp.build}/`))) await store.remove(store.SYS, f.url);
 }).catch(() => {});
 await refresh();
 openLibrary();
