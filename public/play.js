@@ -137,7 +137,7 @@ async function main() {
       emu.on('saveSaveFiles', (data) => uploadSave(data));
       syncControls(game.platform, serverControls);
       setTimeout(applyVpad, 600); // after EmulatorJS restores its own settings
-      assignPads(); setTimeout(assignPads, 600);
+      fixGamepads(); setTimeout(assignPads, 600);
       // restore battery save from the server
       const r = await api('/save');
       if (r.status === 200) {
@@ -180,20 +180,62 @@ function syncControls(platform, serverControls) {
   };
 }
 
-// EmulatorJS only gives a controller a player slot when it sees it *connect* after its menus exist,
-// so pads that were already plugged in (e.g. used to browse the library) would be ignored.
-// Fill empty player slots with already-connected pads, in controller order: pad 1 = P1, pad 2 = P2…
-function assignPads() {
+// Controllers and players. EmulatorJS 4.3's own handling breaks as soon as a controller is not in the browser's first
+// slot: it looks a controller up by the browser's slot number in its own list, which is ordered by position, so a
+// controller in slot 2 with slot 1 empty (what browsers do after you swap or reconnect a controller) throws on
+// every event and never plays; a swapped controller also never gets a player. RetroDesk takes over its events:
+//   - controllers are found by their browser slot (Gamepad.index), and their events passed on with the position
+//     EmulatorJS expects;
+//   - connected controllers fill the players in order, without gaps: one controller is always Player 1;
+//   - a controller that is pressed while Player 1's controller has stayed silent since it was given Player 1
+//     (a controller that is switched off but still listed, for example) takes Player 1 over.
+const padKey = (g) => g.id + '_' + g.index;
+let padUsed = new Set(); // keys of controllers that sent input since they got their player
+function assignPads({ compact = true } = {}) {
   const sel = emu?.gamepadSelection, known = emu?.gamepad?.gamepads;
   if (!Array.isArray(sel) || !known) return;
-  for (const gp of [...known].sort((a, b) => a.index - b.index)) {
-    const key = gp.id + '_' + gp.index;
-    if (sel.includes(key)) continue;
-    const free = sel.indexOf('');
-    if (free < 0) break;
-    sel[free] = key;
-  }
+  const live = [...known].filter(Boolean).sort((a, b) => a.index - b.index).map(padKey);
+  for (let i = 0; i < sel.length; i++) if (sel[i] && !live.includes(sel[i])) sel[i] = '';
+  for (const k of live) if (!sel.includes(k)) { const free = sel.indexOf(''); if (free >= 0) sel[free] = k; }
+  if (compact) { const filled = sel.filter(Boolean); for (let i = 0; i < sel.length; i++) sel[i] = filled[i] || ''; }
   try { emu.updateGamepadLabels?.(); } catch {}
+}
+function fixGamepads() {
+  const gh = emu?.gamepad;
+  if (!gh?.on || !emu.gamepadEvent) return;
+  const pos = (index) => gh.gamepads.findIndex((g) => g && g.index === index);
+  const name = (k) => k.replace(/_\d+$/, '').replace(/\s*\(.*$/, '');
+  const onInput = (e) => {
+    const i = pos(e.gamepadIndex);
+    if (i < 0) return;
+    const k = padKey(gh.gamepads[i]), sel = emu.gamepadSelection || [];
+    const pressed = e.type === 'buttondown' || (e.type === 'axischanged' && Math.abs(e.value || 0) > 0.5);
+    if (pressed) {
+      if (!sel.includes(k)) assignPads();
+      const p = sel.indexOf(k);
+      if (p > 0 && sel[0] && !padUsed.has(sel[0])) { // Player 1's controller never played: this one takes over
+        [sel[0], sel[p]] = [sel[p], sel[0]];
+        try { emu.updateGamepadLabels?.(); } catch {}
+        toast(`${name(k)} is now Player 1`);
+      }
+      padUsed.add(k);
+    }
+    emu.gamepadEvent({ ...e, gamepadIndex: i });
+  };
+  for (const t of ['axischanged', 'buttondown', 'buttonup']) gh.on(t, onInput);
+  gh.on('connected', (e) => {
+    const i = pos(e.gamepadIndex);
+    if (i >= 0) padUsed.delete(padKey(gh.gamepads[i]));
+    assignPads();
+    applyVpad();
+  });
+  // fired while the controller is still in the list; it is removed right after
+  gh.on('disconnected', (e) => {
+    const i = pos(e.gamepadIndex);
+    if (i >= 0) padUsed.delete(padKey(gh.gamepads[i]));
+    setTimeout(() => { assignPads(); applyVpad(); });
+  });
+  assignPads();
 }
 
 // On-screen (touch) controller. Preference is per device: auto | on | off.

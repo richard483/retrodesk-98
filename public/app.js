@@ -925,6 +925,7 @@ async function openControllers() {
       <table class="kv"><tr><td>D-pad / stick</td><td>Move selection, menus and buttons</td></tr><tr><td>A</td><td>Play / OK</td></tr><tr><td>B</td><td>Back / Close dialog</td></tr>
       <tr><td>X</td><td>Game menu (right-click)</td></tr><tr><td>Y</td><td>Properties</td></tr><tr><td>LB / RB</td><td>Switch console folder</td></tr><tr><td>Start</td><td>Start menu</td></tr>
       <tr><td>Hold Select+Start</td><td>Exit the game (saves first)</td></tr></table>
+      <p class="muted">In a game, connected controllers are Player 1, Player 2… in the order shown above. If Player 1's controller stays silent (switched off but still listed), the first controller you press takes over as Player 1.</p>
       <p class="muted">To remap buttons for a console: in a game, choose <b>Game → Controls / remap buttons…</b>. The mapping is saved on the server and used for every game of that console, on every device.</p></fieldset></div>`);
   const win = createWindow({ id: 'controllers', title: 'Controllers', ic: 'gamepad', w: 600, hgt: 520, body });
   const padsEl = $('.pads', body);
@@ -932,7 +933,7 @@ async function openControllers() {
   const draw = () => {
     if (!wins.has('controllers')) return cancelAnimationFrame(raf);
     const ps = pads();
-    padsEl.innerHTML = ps.length ? ps.map((p) => `<div style="margin-bottom:8px"><b>Player ${p.index + 1}:</b> ${esc(p.id)} <span class="${p.mapping === 'standard' ? 'ok' : 'warn'}">(${p.mapping === 'standard' ? 'standard layout' : 'non-standard layout: remap it in-game'})</span>
+    padsEl.innerHTML = ps.length ? ps.map((p, n) => `<div style="margin-bottom:8px"><b>Controller ${n + 1}:</b> ${esc(p.id)} <span class="${p.mapping === 'standard' ? 'ok' : 'warn'}">(${p.mapping === 'standard' ? 'standard layout' : 'non-standard layout: remap it in-game'})</span>
       <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">${p.buttons.slice(0, 17).map((b, i) => `<span class="sunken-panel" style="padding:1px 4px;min-width:34px;text-align:center;${b.pressed ? 'background:#000080;color:#fff' : 'background:#fff'}">${BTN_NAMES[i] || i}</span>`).join('')}</div>
       <div class="muted">Sticks: ${p.axes.map((a) => a.toFixed(2)).join(' / ')}</div></div>`).join('')
       : '<p>No controller detected. Connect one (USB or Bluetooth) and <b>press any button</b>. Browsers only reveal a controller after you press a button.</p>';
@@ -1001,7 +1002,7 @@ function balloon(text) {
 function trayPad() {
   const ps = pads(), t = $('#tray-pad');
   t.innerHTML = ps.length ? icon('gamepad') : '';
-  t.title = ps.map((p) => `Player ${p.index + 1}: ${p.id}`).join('\n');
+  t.title = ps.map((p, n) => `Controller ${n + 1}: ${p.id}`).join('\n');
   t.onclick = openControllers;
 }
 watchGamepads({
