@@ -4,7 +4,8 @@ import { gameFile, download, fmt, putFile } from '/store.js';
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
 const mode = qs.get('mode') || 'keep';   // keep = file is in Cache Storage; stream = memory only
-const resume = qs.get('resume') === '1';
+// ?resume=1 continues from the auto-save made when the game was last closed; ?resume=<1-9> from that state slot.
+const resume = ((r) => (r === '1' ? 'auto' : /^[1-9]$|^auto$/.test(r || '') ? r : null))(qs.get('resume'));
 const statusEl = document.getElementById('status');
 const toastEl = document.getElementById('toast');
 const post = (msg) => parent !== window && parent.postMessage({ ...msg, gameId: id }, location.origin);
@@ -149,7 +150,7 @@ async function main() {
         lastSaveSig = sig(data);
         toast('Save data restored from server');
       }
-      if (resume) setTimeout(() => loadState('auto'), 300);
+      if (resume) setTimeout(() => loadState(resume), 300);
       setInterval(() => { try { gm.saveSaveFiles(); } catch {} }, 30000);
       if (fpsPref()) showFps(true);
       post({ type: 'started' });

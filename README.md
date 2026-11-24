@@ -166,6 +166,49 @@ games", and it has no URL or API for loading a disc from another page. TabStatio
 WebAssembly JITs for all four PS2 processors, a WebGPU renderer, and many games at or near full speed. It can boot a
 BIOS and disc by URL, which is what makes it possible to embed it.
 
+## Saves
+
+Everything is kept on the server, so it follows you to every browser and device. There are two kinds:
+
+| | What it is | How you continue |
+|---|---|---|
+| **Game save** | What the game saves by itself: the PS1 memory card, a cartridge's battery save, PSP save data (PSP/SAVEDATA), PS2 memory cards (shared by all PS2 games, like a real PS2). | It is loaded every time the game starts: use the game's own **Continue / Load** menu, as on the console. |
+| **Save states** | A snapshot of the whole console at one moment. Slots 1–9 are yours (**Game → Save state / Load state**). The **resume point** is made by itself when you close a game. | The Start Game dialog offers **Continue from where I left off** (untick it to start fresh), or pick any slot in Save Data. |
+
+**Save Data** (desktop icon, Start menu, or **Saves & states…** in a game's menu) shows every game's saves. For one game you see:
+- **The game save:** its size and when it was last synced. You can download it, replace it from a file, or delete it.
+- **Save states:** each slot with its screenshot. **Play from here** starts the game at that state. You can also download a state, put a state file into a slot, or delete it.
+
+The library's **Saves** column shows which games have saves.
+
+Downloaded game saves of EmulatorJS consoles are plain RetroArch `.srm` files, which other emulators can use too. PSP and PS2 saves download in RetroDesk's packed format (`.rdpspsave`, `.rdps2cards`), to restore here.
+
+## The desktop
+
+- **Icons:** drag icons anywhere; they snap to a grid. Drag on empty desktop to select several (Ctrl adds), then drag them together. **Delete** removes a shortcut, **F2** renames it, and **Enter** opens it.
+- **Game shortcuts:** they carry the shortcut arrow and a console badge. To add one:
+  - drag a game from My Games onto the desktop;
+  - choose **Create desktop shortcut** in a game's menu;
+  - or right-click the desktop → **New → Shortcut to a game…**.
+
+  Deleting a shortcut never deletes the game.
+- **Desktop menu** (right-click): **Arrange Icons** (by name, by type, auto arrange), **Line up Icons**, **New** (shortcut, sticky note), **Active Desktop** (widgets), **Properties**.
+- **Display Properties:**
+  - **Background:** built-in wallpapers or your own picture (stored on the server), with fill, fit, stretch, center or tile, and a background colour.
+  - **Screen Saver:** Starfield, Mystify, Marquee or Pipes. It never starts while a game window is open.
+  - **Appearance:** colour schemes.
+  - **Web:** Active Desktop widgets.
+- **Active Desktop widgets:**
+  - Clock
+  - Calendar
+  - **Continue Playing**: your last games, with the picture of where you left off; click one to continue.
+  - Sticky notes
+  - System Monitor
+
+  Drag them by their title bar. They are hidden on phone-sized screens.
+
+The layout is stored on the server (`/api/desktop`), so it is the same on every device. Icon places are grid cells, and icons that don't fit a smaller screen move to the next free cell.
+
 ## Game controllers
 
 Any controller the browser's Gamepad API recognises works: Xbox, PS4/PS5, Switch Pro, 8BitDo and others, over
@@ -313,7 +356,10 @@ lib/detect.js        console auto-detection (also looks inside CSO/ZSO, reads CH
 lib/tst.js           TabStationToo (PS2) mirror: download, pin, update, serve
 lib/ppsspp.js        PPSSPP (PSP) build mirror: download, pin, update, serve
 public/              Win98 frontend (vanilla JS, no build step)
-  app.js             desktop, windows, library, upload, play dialog, storage/BIOS managers
+  app.js             windows, menus, library, upload, play dialog, storage/BIOS managers
+  desktop.js         desktop icons and shortcuts, rubber band, wallpaper, schemes, screen saver, widgets
+  saves.js           Save Data window: game saves and save states per game
+  vpad.js            on-screen PS2 controller (handed to TabStationToo as a gamepad)
   play.html/js       emulator page (runs inside a game window), save sync
   ps2.html/js        PS2 page: hosts TabStationToo, state slots, memory card sync
   psp.html/js        PSP page: runs PPSSPP, state slots, SAVEDATA + settings sync

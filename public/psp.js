@@ -11,7 +11,8 @@ import { installScriptProcessorPolyfill } from '/vendor/ppsspp-web/sp-shim.js';
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
 const mode = qs.get('mode') || 'keep';
-const resume = qs.get('resume') === '1';
+// ?resume=1 continues from the auto-save made when the game was last closed; ?resume=<1-9> from that state slot.
+const resume = ((r) => (r === '1' ? 'auto' : /^[1-9]$|^auto$/.test(r || '') ? r : null))(qs.get('resume'));
 const canvas = document.getElementById('canvas');
 const statusEl = document.getElementById('status');
 const toastEl = document.getElementById('toast');
@@ -393,7 +394,7 @@ function onBooted() {
   setStatus('');
   canvas.focus();
   post({ type: 'started' });
-  if (resume) setTimeout(() => loadState('auto'), 4000);
+  if (resume) setTimeout(() => loadState(resume), 4000);
   // game saves: pushed shortly after the game writes them; settings: when they change
   setInterval(() => { pushSaves().catch((e) => console.warn('save sync', e)); pushSettings().catch(() => {}); }, 10000);
 }

@@ -205,3 +205,88 @@ body.game-fs #desktop { bottom: 0; }
     background: rgba(0,0,0,.8); color: #fff; font-size: 16px; text-align: center; padding: 24px; }
   .rotate-hint > div { font-size: 56px; line-height: 1; }
 }
+
+/* ======================= desktop (desktop.js) ======================= */
+/* icons sit in grid cells, placed by desktop.js */
+.icons { display: block; inset: 0; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+.dicon { position: absolute; touch-action: none; }
+.dicon .ico { position: relative; width: 32px; height: 32px; }
+.dicon .ico > svg:first-child { width: 32px; height: 32px; }
+.dicon .ico .arrow { position: absolute; left: -1px; bottom: -1px; width: 11px; height: 11px; image-rendering: pixelated; }
+.dicon .ico .badge { position: absolute; right: -10px; top: -4px; font: bold 8px/1 Arial, sans-serif; font-style: normal; color: #fff; background: var(--hilite, #000080);
+  border: 1px solid #fff; padding: 1px 2px; white-space: nowrap; max-width: 34px; overflow: hidden; }
+.dicon span { max-height: 2.5em; overflow: hidden; text-shadow: 1px 1px 1px rgba(0,0,0,.6); word-break: break-word; }
+.dicon.sel span { background: var(--hilite, #000080); text-shadow: none; }
+.dicon:focus { outline: none; }
+.dicon:focus span { outline: 1px dotted #fff; }
+.dicon.dragging { opacity: .6; z-index: 3; pointer-events: none; }
+.dicon.sel .ico > svg:first-child { filter: drop-shadow(0 0 0 #000080) brightness(.7) sepia(1) hue-rotate(190deg) saturate(4); }
+.marquee { position: absolute; z-index: 4; border: 1px dotted #fff; outline: 1px dotted #000; outline-offset: -1px; pointer-events: none; }
+
+/* colour scheme (Display Properties → Appearance) */
+.window.app.active > .title-bar { background: linear-gradient(90deg, var(--tb1, #000080), var(--tb2, #1084d0)); }
+.list tr.sel td, .menu .item:hover:not(.disabled), .menu .item.hot, .tree li.sel span { background: var(--hilite, #000080); }
+
+/* screen saver */
+canvas.saver { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 2000000; background: #000; cursor: none; }
+canvas.saver.preview { position: absolute; width: 100%; height: 100%; z-index: 2; cursor: default; }
+
+/* Active Desktop widgets: above the icons, below every window */
+#widgets { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.widget { position: absolute; pointer-events: auto; background: silver; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080, inset 2px 2px #fff; padding: 3px; }
+.widget .wbar { display: flex; align-items: center; justify-content: space-between; height: 14px; padding: 0 2px; color: #fff; font-weight: bold; cursor: move;
+  background: linear-gradient(90deg, var(--tb1, #000080), var(--tb2, #1084d0)); opacity: 0; transition: opacity .15s; touch-action: none; }
+.widget:hover .wbar, .widget:focus-within .wbar { opacity: 1; }
+@media (pointer: coarse) { .widget .wbar { opacity: 1; } }
+.widget .wbar button { min-width: 0; min-height: 0; width: 13px; height: 11px; padding: 0; line-height: 8px; font-size: 10px; }
+.widget .wbody { padding: 3px; }
+.w-clock .clockface { width: 100%; display: block; }
+.w-clock .clockdate { text-align: center; margin-top: 2px; }
+.calhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+button.small { min-width: 0; min-height: 0; padding: 0 5px; height: 18px; font-size: 11px; }
+table.cal { width: 100%; border-collapse: collapse; background: #fff; }
+table.cal th { font-weight: normal; color: #808080; padding: 1px; }
+table.cal td { text-align: center; padding: 2px 1px; }
+table.cal td.today { background: var(--hilite, #000080); color: #fff; }
+.w-note .wbody { padding: 0; }
+.w-note { background: #ffff88; box-shadow: 2px 2px 0 rgba(0,0,0,.35); }
+textarea.note { width: 100%; height: 130px; resize: vertical; border: 0; background: transparent; font: 13px "Comic Sans MS", "Segoe Print", cursive; padding: 4px; outline: none; box-shadow: none; }
+.cont { display: flex; gap: 6px; align-items: center; padding: 3px; cursor: pointer; background: #fff; margin-bottom: 3px; border: 1px solid #808080; }
+.cont:hover { background: #e8e8ff; }
+.cont img, .cont .noshot { width: 64px; height: 48px; object-fit: cover; background: #000; flex: none; display: flex; align-items: center; justify-content: center; image-rendering: pixelated; }
+.cont .noshot svg { width: 32px; height: 32px; }
+.cont b { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget .meter { height: 10px; background: #fff; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff; position: relative; }
+.widget .meter .fill { position: absolute; inset: 1px auto 1px 1px; background: var(--hilite, #000080); }
+
+/* Display Properties: the little monitor */
+.monitor { width: 180px; margin: 0 auto 10px; }
+.monitor .screen { position: relative; height: 112px; border: 8px solid #c0c0c0; border-bottom-width: 14px; box-shadow: inset 1px 1px #000, 1px 1px 0 #808080, -1px -1px 0 #fff; overflow: hidden; }
+.monitor .mini-title { position: absolute; left: 30px; top: 22px; width: 90px; height: 50px; color: #fff; font-size: 8px; line-height: 9px; padding: 0 3px; border: 1px solid #000; z-index: 1;
+  background: linear-gradient(90deg, var(--a, #000080), var(--b, #1084d0)) top / 100% 10px no-repeat, silver; box-shadow: inset -1px -1px #808080, inset 1px 1px #fff; }
+.monitor .stand { width: 60px; height: 10px; margin: 0 auto; background: silver; box-shadow: inset -1px -1px #808080, inset 1px 1px #fff; }
+select[size] { width: 100%; height: auto; background: #fff; }
+
+/* Save Data */
+.saves-win fieldset { background: silver; }
+.saves-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.saves-head svg { width: 32px; height: 32px; }
+.saves-head .play { margin-left: auto; }
+.save-row { display: flex; gap: 8px; align-items: flex-start; }
+.save-row > svg { width: 32px; height: 32px; flex: none; }
+.buttons.left { justify-content: flex-start; margin-top: 6px; }
+.state-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.state { background: #fff; border: 1px solid #808080; padding: 3px; display: flex; flex-direction: column; gap: 3px; cursor: default; }
+.state .shot { aspect-ratio: 4/3; background: #000; color: #808080; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 10px; }
+.state .shot img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.state.empty { background: transparent; border-style: dashed; }
+.state.empty .shot { background: rgba(0,0,0,.08); }
+.state .cap { line-height: 1.5; }
+.state .cap button { margin: 1px 2px 0 0; }
+.state[data-slot=auto]:not(.empty) { border-color: var(--hilite, #000080); box-shadow: 0 0 0 1px var(--hilite, #000080); }
+.savecol a { color: inherit; text-decoration: none; }
+img.resume-shot { width: 64px; height: 48px; object-fit: contain; background: #000; margin-right: 6px; image-rendering: pixelated; }
+button.ico-btn { padding: 0 3px; } button.ico-btn svg { width: 12px; height: 12px; vertical-align: -2px; }
+.savecol svg { width: 12px !important; height: 12px !important; margin-right: 3px !important; vertical-align: -2px !important; }
+/* widgets are laid out for a wide screen; on a phone they would cover the icons */
+@media (max-width: 600px) { #widgets { display: none; } }

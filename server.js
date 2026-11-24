@@ -138,6 +138,9 @@ const tst = await createTstMirror({ dir: DIRS.tst, source: TST_URL });
 const ppsspp = await createPpssppMirror({ dir: DIRS.ppsspp, source: PPSSPP_URL });
 
 // ---------------- library ----------------
+// What a game's save file is called when downloaded: the format each emulator keeps it in.
+const SAVE_EXT = { psp: '.rdpspsave', ps2: '.rdps2cards' };
+const dlName = (g, suffix) => `${g.title.replace(/[\\/:*?"<>|]+/g, '_')}${suffix}`;
 function gameView(g) {
   const p = PLATFORMS[g.platform] || PLATFORMS.unknown;
   return { ...g, platformName: p.name, platformShort: p.short, playable: p.playable, romUrl: `/api/games/${g.id}/rom/${encodeURIComponent(g.file)}` };
@@ -281,7 +284,7 @@ async function handle(req, res) {
     const dir = path.join(DIRS.saves, '_ps2'), file = path.join(dir, 'cards.bin');
     if (M === 'GET') {
       if (!existsSync(file)) return fail(res, 404, 'No memory cards on the server yet');
-      return serveFile(req, res, file, { cache: 'no-store' });
+      return serveFile(req, res, file, { cache: 'no-store', downloadName: url.searchParams.has('dl') ? 'PS2 memory cards.rdps2cards' : undefined });
     }
     if (M === 'PUT') {
       const data = await readBody(req, 256 << 20);
@@ -295,6 +298,41 @@ async function handle(req, res) {
     }
   }
   if (p === '/api/ps2/cards/info' && M === 'GET') return send(res, 200, db.ps2Cards || { version: 0 });
+
+  // Every game's saves at a glance: the game's own save file and its save states (Save Data window, library).
+  if (p === '/api/saves' && M === 'GET') {
+    const out = {};
+    for (const g of Object.values(db.games)) {
+      const dir = path.join(DIRS.saves, g.id), e = { save: null, states: [] };
+      try { const st = await stat(path.join(dir, 'save.bin')); e.save = { size: st.size, time: st.mtimeMs }; } catch {}
+      for (const s of ['auto', ...'123456789']) {
+        try { const st = await stat(path.join(dir, `state-${s}.bin`)); e.states.push({ slot: s, size: st.size, time: st.mtimeMs, shot: existsSync(path.join(dir, `state-${s}.png`)) }); } catch {}
+      }
+      if (e.save || e.states.length) out[g.id] = e;
+    }
+    let cards = null;
+    try { const st = await stat(path.join(DIRS.saves, '_ps2', 'cards.bin')); cards = { size: st.size, time: st.mtimeMs }; } catch {}
+    return send(res, 200, { games: out, ps2Cards: cards });
+  }
+
+  // The desktop: shortcuts and their places, wallpaper, widgets, screen saver (one layout for all devices).
+  if (p === '/api/desktop') {
+    if (M === 'GET') return db.desktop ? send(res, 200, db.desktop) : (res.writeHead(204), res.end());
+    if (M === 'PUT') { db.desktop = JSON.parse((await readBody(req, 1 << 20)).toString()); await saveDb(); return send(res, 200, { ok: true }); }
+  }
+  if (p === '/api/desktop/wallpaper') {
+    const dir = path.join(DATA, 'desktop'), f = path.join(dir, 'wallpaper');
+    if (M === 'GET') return serveFile(req, res, f, { type: db.wallpaperType || 'image/jpeg' });
+    if (M === 'PUT') {
+      const type = String(req.headers['content-type'] || '');
+      if (!/^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(type)) return fail(res, 415, 'Choose a picture (PNG, JPEG, GIF, WebP, BMP or SVG)');
+      await mkdir(dir, { recursive: true });
+      await writeFile(f + '.tmp', await readBody(req, 32 << 20)); await rename(f + '.tmp', f);
+      db.wallpaperType = type; await saveDb();
+      return send(res, 200, { ok: true });
+    }
+    if (M === 'DELETE') { await rm(f, { force: true }); delete db.wallpaperType; await saveDb(); return send(res, 200, { ok: true }); }
+  }
 
   if (p === '/api/info' && M === 'GET') {
     return send(res, 200, { ejsVersion: EJS_VERSION, platforms: PLATFORMS, runtimeFiles: RUNTIME_FILES, tst: tst.info(), ppsspp: ppsspp.info(), downloadChunk: DOWNLOAD_CHUNK, uploadChunk: UPLOAD_CHUNK });
@@ -367,7 +405,8 @@ async function handle(req, res) {
     // in-game battery save (SRAM)
     if (sub === '/save') {
       const f = path.join(saveDir, 'save.bin');
-      if (M === 'GET') return existsSync(f) ? serveFile(req, res, f) : (res.writeHead(204), res.end());
+      if (M === 'GET') return existsSync(f) ? serveFile(req, res, f, { downloadName: url.searchParams.has('dl') ? dlName(g, SAVE_EXT[g.platform] || '.srm') : undefined }) : (res.writeHead(204), res.end());
+      if (M === 'DELETE') { await rm(f, { force: true }); delete g.saveUpdated; await saveDb(); return send(res, 200, { ok: true }); }
       if (M === 'PUT' || M === 'POST') { // POST = navigator.sendBeacon on tab close
         const body = await readBody(req);
         await mkdir(saveDir, { recursive: true }); await writeFile(f + '.tmp', body); await rename(f + '.tmp', f);
@@ -386,7 +425,7 @@ async function handle(req, res) {
         return send(res, 200, out);
       }
       const f = path.join(saveDir, `state-${slot}.${shot ? 'png' : 'bin'}`);
-      if (M === 'GET') return serveFile(req, res, f, { type: shot ? 'image/png' : 'application/octet-stream' });
+      if (M === 'GET') return serveFile(req, res, f, { type: shot ? 'image/png' : 'application/octet-stream', downloadName: url.searchParams.has('dl') && !shot ? dlName(g, ` - ${slot === 'auto' ? 'resume' : 'slot ' + slot}.state`) : undefined });
       if (M === 'PUT') {
         await mkdir(saveDir, { recursive: true });
         const r = await receivePiece(req, url, f + '.part'); // may arrive in pieces (see receivePiece)

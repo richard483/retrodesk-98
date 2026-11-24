@@ -1,6 +1,8 @@
 import { icon, platformIcon } from '/icons.js';
 import * as store from '/store.js';
 import { watchGamepads, pads, BTN } from '/gamepad.js';
+import { initSaves } from '/saves.js';
+import { initDesktop } from '/desktop.js';
 const { fmt } = store;
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -274,8 +276,13 @@ function prompt98(label, value = '', title = 'Rename') {
 }
 
 // ======================= data =======================
+let SAVES = {}; // game id -> { save, states } (Save Data, library column, Continue Playing widget)
+async function refreshSaves() {
+  try { SAVES = (await api('/saves')).games || {}; } catch {}
+  document.dispatchEvent(new Event('saves'));
+}
 async function refresh() {
-  [GAMES] = await Promise.all([api('/games')]);
+  [GAMES] = await Promise.all([api('/games'), refreshSaves()]);
   const cached = await store.list(store.GAMES).catch(() => []);
   CACHED = new Set(cached.map((c) => decodeURIComponent(c.path)));
   for (const g of GAMES) g.inBrowser = CACHED.has(decodeURIComponent(g.romUrl));
@@ -332,20 +339,23 @@ function openLibrary() {
     return r.sort((a, b) => { const x = a[sortKey] ?? 0, y = b[sortKey] ?? 0; return (typeof x === 'string' ? x.localeCompare(y) : x - y) * sortDir; });
   }
 
+  document.addEventListener('saves', () => { if (wins.has('library')) render(); });
   function render() {
     renderTree();
     const r = rows();
     if (!GAMES.length) list.innerHTML = `<div class="empty">${icon('upload')}<p>No games yet.</p><p>Drag &amp; drop ROM / ISO files here,<br>or click <b>Upload</b>. The console is detected automatically.</p></div>`;
     else {
       const th = (k, l, cls = '') => `<th data-k="${k}" class="${cls}">${l}${sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-      list.innerHTML = `<table><thead><tr>${th('title', 'Name')}${th('platformShort', 'Console')}${th('size', 'Size')}${th('inBrowser', 'In browser')}${th('lastPlayed', 'Last played')}</tr></thead><tbody>${r.map((g) => `
-        <tr data-id="${g.id}" class="${g.id === sel ? 'sel' : ''} ${g.playable ? '' : 'unplayable'}" title="${esc(g.file)}">
+      list.innerHTML = `<table><thead><tr>${th('title', 'Name')}${th('platformShort', 'Console')}${th('size', 'Size')}${th('inBrowser', 'In browser')}<th title="Game save / save states">Saves</th>${th('lastPlayed', 'Last played')}</tr></thead><tbody>${r.map((g) => `
+        <tr data-id="${g.id}" class="${g.id === sel ? 'sel' : ''} ${g.playable ? '' : 'unplayable'}" title="${esc(g.file)}" draggable="${COARSE ? 'false' : 'true'}">
           <td>${icon(platformIcon(g.platform))}${esc(g.title)}</td><td>${esc(g.platformShort)}${g.guessed ? ' (?)' : ''}</td>
-          <td style="text-align:right">${fmt(g.size)}</td><td>${g.inBrowser ? '✓ Stored' : ''}</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleDateString() : ''}</td></tr>`).join('')}</tbody></table>`;
+          <td style="text-align:right">${fmt(g.size)}</td><td>${g.inBrowser ? '✓ Stored' : ''}</td><td class="savecol">${saveCell(g)}</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleDateString() : ''}</td></tr>`).join('')}</tbody></table>`;
       list.querySelectorAll('th').forEach((t) => (t.onclick = () => { if (sortKey === t.dataset.k) sortDir *= -1; else { sortKey = t.dataset.k; sortDir = 1; } render(); }));
       list.querySelectorAll('tr[data-id]').forEach((tr) => {
         tr.onclick = () => { const again = sel === tr.dataset.id; sel = tr.dataset.id; render(); if (again && tapped()) preparePlay(cur()); };
         tr.ondblclick = () => preparePlay(cur());
+        tr.ondragstart = (e) => { e.dataTransfer.setData(desktop.DT, tr.dataset.id); e.dataTransfer.setData('text/plain', GAMES.find((g) => g.id === tr.dataset.id)?.title || ''); e.dataTransfer.effectAllowed = 'copyLink'; };
+        tr.querySelector('.savecol a')?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openGameSaves(GAMES.find((g) => g.id === tr.dataset.id)); });
         tr.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); sel = tr.dataset.id; render(); gameMenu(cur(), e.clientX, e.clientY); };
       });
     }
@@ -386,6 +396,9 @@ function gameMenu(g, x, y) {
   const plats = Object.values(INFO.platforms).sort((a, b) => a.name.localeCompare(b.name));
   showMenu([
     { label: 'Play', bold: true, icon: 'gamepad', disabled: !g.playable, action: () => preparePlay(g) },
+    { label: 'Saves & states…', icon: 'floppy', action: () => openGameSaves(g) },
+    desktop.hasShortcut('game:' + g.id) ? { label: 'Remove desktop shortcut', action: () => desktop.removeShortcut('game:' + g.id) } : { label: 'Create desktop shortcut', action: () => desktop.addShortcut('game:' + g.id) },
+    '-',
     g.inBrowser ? { label: 'Remove from this browser', action: () => uncacheGame(g) } : { label: 'Keep in this browser (download)', disabled: !g.playable, action: () => cacheGameDialog(g) },
     '-',
     { label: 'Save to my computer', action: () => saveGameToDisk(g) },
@@ -478,7 +491,7 @@ async function requirements(g) {
   return { p, sys, game, est, threads, bios: files.bios, engine: files.engine || 'ejs', build: files.build };
 }
 
-async function preparePlay(g) {
+async function preparePlay(g, { slot } = {}) {
   if (!g) return;
   const p = INFO.platforms[g.platform];
   if (!p.playable) return msgbox(`${p.name}: ${p.note || 'not playable in the browser.'}\n\nThe file is safely stored on the server.`, { title: g.title, ic: 'warn' });
@@ -488,7 +501,9 @@ async function preparePlay(g) {
     return;
   }
   const states = await api(`/games/${g.id}/states`).catch(() => []);
-  const auto = states.find((s) => s.slot === 'auto');
+  // the state to start from: the one asked for (Save Data → Play from here), else the auto-save made at the last close
+  const from = states.find((s) => s.slot === (slot || 'auto'));
+  const fromLabel = from && (from.slot === 'auto' ? `where I left off (auto-saved when the game was closed, ${new Date(from.time).toLocaleString()})` : `save state slot ${from.slot} (${new Date(from.time).toLocaleString()})`);
   const R = await requirements(g);
   const groups = R.engine === 'tst'
     ? { core: 'PS2 emulator: TabStationToo (PCSX2)', runtime: 'TabStationToo page (interface, fonts, title list)', bios: 'BIOS' }
@@ -520,7 +535,8 @@ async function preparePlay(g) {
       ${R.est.quota && needSys + needGame > R.est.free ? '<p class="warn">Not enough free browser storage to keep this game. Use “Play without keeping”, or free space in Storage Manager.</p>' : ''}
       ${R.est.persisted ? '' : '<p class="muted">Storage is “best effort”: the browser may evict it under pressure. <a href="#" class="persist">Make storage persistent</a></p>'}
     </fieldset>${memNote}
-    <div class="field-row" style="margin-top:8px">${auto ? `<input type="checkbox" id="resume" checked><label for="resume">Resume where I left off (auto-save ${new Date(auto.time).toLocaleString()})</label>` : `<span class="muted">${R.engine === 'tst' ? 'Memory cards &amp; states' : 'Saves &amp; states'} sync to the server automatically.</span>`}</div>
+    <div class="field-row" style="margin-top:8px">${from ? `${from.shot ? `<img class="resume-shot" src="/api/games/${g.id}/states/${from.slot}/shot?t=${from.time}" alt="">` : ''}<input type="checkbox" id="resume" checked><label for="resume">Continue from ${esc(fromLabel)}</label>` : `<span class="muted">${R.engine === 'tst' ? 'Memory cards &amp; states' : 'Saves &amp; states'} sync to the server automatically.</span>`}</div>
+    <p class="muted" style="margin:4px 0 0">${from ? 'Untick to start fresh. Your game\'s own save file loads either way, so you can also continue from the game\'s Load menu. ' : ''}<a href="#" class="saves-link">Saves &amp; states…</a></p>
     <div class="buttons"><button class="keep" ${R.est.quota && needSys + needGame > R.est.free ? 'disabled' : ''}><b>${needGame ? 'Download &amp; Play' : 'Play'}</b></button>
       ${R.game.cached ? '' : '<button class="stream">Play without keeping</button>'}<button class="cancel">Cancel</button></div></div>`);
   const win = createWindow({ title: 'Start Game', ic: 'gamepad', w: 580, body, dialog: true });
@@ -529,12 +545,22 @@ async function preparePlay(g) {
   const go = async (keep) => {
     if (fsAuto()) browserFullscreen(); // needs this tap; the game window fills the screen when it opens
     closeWin(win);
-    const resume = !!$('#resume', body)?.checked;
+    const resume = $('#resume', body)?.checked ? from.slot : null;
     const ok = await downloadWithProgress(g, sysNeed, keep && !R.game.cached);
     if (ok) { if (keep) await refresh(); launch(g, keep || R.game.cached ? 'keep' : 'stream', resume); }
   };
+  $('.saves-link', body).onclick = (e) => { e.preventDefault(); openGameSaves(g); };
   $('.keep', body).onclick = () => go(true);
   $('.stream', body)?.addEventListener('click', () => go(false));
+}
+
+// The library's Saves column: 💾 when the game has its own save on the server, and the number of save states.
+function saveCell(g) {
+  const e = SAVES[g.id];
+  if (!e) return '';
+  const n = e.states.filter((s) => s.slot !== 'auto').length, auto = e.states.some((s) => s.slot === 'auto');
+  const tip = [e.save && 'game save', n && `${n} save state(s)`, auto && 'resume point'].filter(Boolean).join(', ');
+  return `<a href="#" title="${esc(tip)} — open Save Data">${e.save ? icon('floppy') : ''}${n ? `${n} state${n > 1 ? 's' : ''}` : ''}${auto && !n ? 'resume' : ''}</a>`;
 }
 
 function meterHtml(est, adding = 0) {
@@ -611,7 +637,7 @@ function launch(g, mode, resume) {
   const engine = INFO.platforms[g.platform]?.engine;
   const ps2 = engine === 'tst', psp = engine === 'ppsspp';
   const page = ps2 ? '/ps2.html' : psp ? '/psp.html' : '/play.html';
-  const frame = h(`<iframe allow="fullscreen; gamepad; autoplay; cross-origin-isolated" src="${page}?id=${g.id}&mode=${mode}${resume ? '&resume=1' : ''}"></iframe>`);
+  const frame = h(`<iframe allow="fullscreen; gamepad; autoplay; cross-origin-isolated" src="${page}?id=${g.id}&mode=${mode}${resume ? '&resume=' + encodeURIComponent(resume === true ? 'auto' : resume) : ''}"></iframe>`);
   const send = (msg) => frame.contentWindow.postMessage(msg, location.origin);
   let exiting = false;
   const slotItems = (cmd) => ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((s) => ({ label: 'Slot ' + s, action: () => frame.contentWindow.postMessage({ cmd, slot: s }, location.origin) }));
@@ -619,7 +645,8 @@ function launch(g, mode, resume) {
     id, title: g.title, ic: 'gamepad', w: 800, hgt: 640, cls: 'game', body: frame,
     menubar: {
       Game: [{ label: 'Save state', sub: slotItems('saveState') }, { label: 'Load state', sub: slotItems('loadState') }, { label: 'Load auto-save', action: () => frame.contentWindow.postMessage({ cmd: 'loadState', slot: 'auto' }, location.origin) }, '-',
-        { label: ps2 ? 'Sync memory cards now' : 'Sync save data now', action: () => frame.contentWindow.postMessage({ cmd: 'syncSave' }, location.origin) }, '-',
+        { label: ps2 ? 'Sync memory cards now' : 'Sync save data now', action: () => frame.contentWindow.postMessage({ cmd: 'syncSave' }, location.origin) },
+        { label: 'Saves & states…', icon: 'floppy', action: () => openGameSaves(g) }, '-',
         { label: 'Controls / remap buttons…', action: () => frame.contentWindow.postMessage({ cmd: 'controls' }, location.origin) }, '-', { label: 'Exit  (hold Select+Start)', action: () => closeWin(win) }],
       View: ps2 ? () => {
         let panel = false; try { panel = localStorage.getItem('rd-ps2-panel') === '1'; } catch {}
@@ -721,12 +748,13 @@ async function properties(g) {
         <tr><td>Last played:</td><td>${g.lastPlayed ? new Date(g.lastPlayed).toLocaleString() : 'Never'}</td></tr>
         <tr><td>Play time:</td><td>${Math.floor(g.playTime / 3600)}h ${Math.floor((g.playTime % 3600) / 60)}m</td></tr></table>
         ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ''}</div>
-      <div data-p="saves" hidden><p>Battery save: ${g.saveUpdated ? 'synced ' + new Date(g.saveUpdated).toLocaleString() : 'none yet'}</p>
+      <div data-p="saves" hidden><p>Game save: ${g.saveUpdated ? 'synced ' + new Date(g.saveUpdated).toLocaleString() : 'none yet'} <button class="open-saves" style="float:right">Saves &amp; states…</button></p>
         <div class="shots">${states.map((s) => `<figure>${s.shot ? `<img src="/api/games/${g.id}/states/${s.slot}/shot?t=${s.time}" loading="lazy">` : '<div class="muted">(no screenshot)</div>'}<figcaption>${s.slot === 'auto' ? 'Auto-save' : 'Slot ' + s.slot}<br><span class="muted">${new Date(s.time).toLocaleString()}</span><br><button data-del="${s.slot}">Delete</button></figcaption></figure>`).join('') || '<p class="muted">No save states.</p>'}</div></div>
     </div></div>
     <div class="buttons"><button class="ok">OK</button></div></div>`);
   const win = createWindow({ title: g.title + ' Properties', ic: 'info', w: 500, body, dialog: true });
   body.querySelectorAll('[role=tab]').forEach((t) => (t.onclick = () => { body.querySelectorAll('[role=tab]').forEach((x) => x.setAttribute('aria-selected', x === t)); body.querySelectorAll('[data-p]').forEach((x) => (x.hidden = x.dataset.p !== t.dataset.t)); }));
+  $('.open-saves', body).onclick = () => { closeWin(win); openGameSaves(g); };
   body.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { await fetch(`/api/games/${g.id}/states/${b.dataset.del}`, { method: 'DELETE' }); b.closest('figure').remove(); }));
   $('.ok', body).onclick = () => closeWin(win);
 }
@@ -836,41 +864,8 @@ function about() {
 }
 
 // ======================= desktop, start menu, taskbar =======================
-const DESK = [
-  { ic: 'computer', label: 'My Games', action: openLibrary },
-  { ic: 'drive', label: 'Storage Manager', action: openStorage },
-  { ic: 'upload', label: 'Upload Games', action: pickFiles },
-  { ic: 'chip', label: 'BIOS Files', action: openBios },
-  { ic: 'gamepad', label: 'Controllers', action: openControllers },
-];
-function renderDesktop() {
-  const box = $('#icons'); box.innerHTML = '';
-  for (const d of DESK) {
-    const el = h(`<div class="dicon" tabindex="0">${icon(d.ic)}<span>${esc(d.label)}</span></div>`);
-    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (tapped()) d.action(); };
-    el.ondblclick = d.action;
-    el.onkeydown = (e) => { if (e.key === 'Enter') d.action(); };
-    el.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); showMenu([{ label: 'Open', bold: true, action: d.action }], e.clientX, e.clientY); };
-    box.append(el);
-  }
-  // recently played games as desktop shortcuts
-  for (const g of GAMES.filter((g) => g.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6)) {
-    const el = h(`<div class="dicon" tabindex="0">${icon(platformIcon(g.platform))}<span>${esc(g.title)}</span></div>`);
-    el.onclick = (e) => { e.stopPropagation(); box.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); el.classList.add('sel'); if (tapped()) preparePlay(g); };
-    el.ondblclick = () => preparePlay(g);
-    el.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); gameMenu(g, e.clientX, e.clientY); };
-    box.append(el);
-  }
-}
-document.addEventListener('library', renderDesktop);
-$('#desktop').addEventListener('click', (e) => { if (e.target.id === 'desktop' || e.target.id === 'icons') document.querySelectorAll('.dicon.sel').forEach((x) => x.classList.remove('sel')); });
-$('#desktop').addEventListener('contextmenu', (e) => {
-  if (e.target.closest('.window')) { if (!e.target.closest('input,textarea')) e.preventDefault(); return; }
-  e.preventDefault();
-  showMenu([{ label: 'Upload games…', icon: 'upload', action: pickFiles }, { label: 'Refresh', action: refresh }, '-',
-    { label: 'Arrange windows', sub: [{ label: 'Cascade', action: cascade }, { label: 'Minimize all', action: () => { wins.forEach((w) => w.el.classList.add('min')); renderTasks(); } }] }, '-',
-    { label: 'Storage Manager', icon: 'drive', action: openStorage }, { label: 'Properties', action: about }], e.clientX, e.clientY);
-});
+// no browser menu inside windows and widgets (except in text fields); the desktop's own menu is in desktop.js
+$('#desktop').addEventListener('contextmenu', (e) => { if ((e.target.closest('.window') || e.target.closest('.widget')) && !e.target.closest('input,textarea')) e.preventDefault(); });
 function cascade() { let i = 0; for (const w of wins.values()) { w.el.classList.remove('min', 'max'); w.el.style.left = 20 + i * 24 + 'px'; w.el.style.top = 20 + i * 24 + 'px'; focusWin(w); i++; } }
 
 const startBtn = $('#start');
@@ -885,9 +880,11 @@ startBtn.addEventListener('pointerdown', (e) => {
     { ic: 'computer', label: 'My Games', action: openLibrary },
     { ic: 'gamepad', label: 'Recent Games', sub: recent.length ? recent.map((g) => ({ label: g.title, action: () => preparePlay(g) })) : [{ label: '(none)', disabled: true }] },
     { ic: 'upload', label: 'Upload Games…', action: pickFiles }, '-',
+    { ic: 'floppy', label: 'Save Data', action: openSaveData },
     { ic: 'drive', label: 'Storage Manager', action: openStorage },
     { ic: 'chip', label: 'BIOS Files', action: openBios },
     { ic: 'gamepad', label: 'Controllers', action: openControllers },
+    { ic: 'display', label: 'Display Properties', action: () => desktop.displayProps() },
     { ic: 'info', label: 'About', action: about }, '-',
     { ic: 'computer', label: fsElement() ? 'Exit full screen' : 'Full screen mode', action: () => (fsElement() ? exitFullscreen() : enterFullscreen(document.documentElement)) },
     ...(isStandalone() ? [] : [{ ic: 'upload', label: 'Install as app…', action: installApp }]), '-',
@@ -1013,6 +1010,24 @@ watchGamepads({
   paused: () => !openMenu && !$('#startmenu') && (fsElement()?.tagName === 'IFRAME' || !!activeWin()?.id.startsWith('game-')),
 });
 
+// ======================= saves, desktop =======================
+const gameOpen = () => [...wins.keys()].some((k) => k.startsWith('game-'));
+const { openGameSaves, openSaveData } = initSaves({ h, esc, icon, platformIcon, fmt, api, createWindow, closeWin, focusWin, wins, msgbox, confirmBox, showMenu, putFile: store.putFile,
+  info: () => INFO, games: () => GAMES, preparePlay, properties, tapped, changed: refreshSaves });
+const desktop = initDesktop({ h, esc, icon, platformIcon, fmt, showMenu, closeMenus, createWindow, closeWin, focusWin, wins, msgbox, confirmBox, prompt98, tapped,
+  games: () => GAMES, saveSummary: () => SAVES, preparePlay, properties, openGameSaves, refresh, pickFiles, cascade, estimate: store.estimate,
+  minimizeAll: () => { wins.forEach((w) => w.el.classList.add('min')); renderTasks(); },
+  gameOpen, gameActive: () => !!activeWin()?.id.startsWith('game-'),
+  apps: {
+    library: { ic: 'computer', label: 'My Games', action: openLibrary, fixed: true },
+    savedata: { ic: 'floppy', label: 'Save Data', action: openSaveData },
+    storage: { ic: 'drive', label: 'Storage Manager', action: openStorage },
+    upload: { ic: 'upload', label: 'Upload Games', action: pickFiles },
+    bios: { ic: 'chip', label: 'BIOS Files', action: openBios },
+    controllers: { ic: 'gamepad', label: 'Controllers', action: openControllers },
+    display: { ic: 'display', label: 'Display Properties', action: () => desktop.displayProps() },
+  } });
+
 // ======================= boot =======================
 INFO = await api('/info');
 // Emulator files cached for another EmulatorJS release (or before versioned URLs), or for an older PPSSPP build,
@@ -1022,4 +1037,5 @@ store.list(store.SYS).then(async (files) => {
     || (f.path.startsWith('/ppsspp/') && INFO.ppsspp?.build && !f.path.startsWith(`/ppsspp/${INFO.ppsspp.build}/`))) await store.remove(store.SYS, f.url);
 }).catch(() => {});
 await refresh();
+await desktop.load();
 openLibrary();

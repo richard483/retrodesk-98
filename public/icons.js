@@ -55,6 +55,14 @@ const ART = {
     '................', '................', '................', '...kkkkkkkkkk...', '..kssssssssssk..', '.ksskssssssrssk.',
     '.kskkksssssrsrk.', '.ksskssggssrssk.', '.kssssskksssssk.', '.ksssskkkksssk..', '..ksskk..kkssk..', '..kkk......kkk..',
     '................', '................', '................', '................'],
+  floppy: [
+    'kkkkkkkkkkkkkkkk', 'kBBksssssgsskBBk', 'kBBksssssgsskBBk', 'kBBksssssgsskBBk', 'kBBkkkkkkkkkkBBk', 'kBBBBBBBBBBBBBBk',
+    'kBBBBBBBBBBBBBBk', 'kBBwwwwwwwwwwBBk', 'kBBwkkkkkkkkwBBk', 'kBBwwwwwwwwwwBBk', 'kBBwkkkkkkkkwBBk', 'kBBwwwwwwwwwwBBk',
+    'kBBwwwwwwwwwwBBk', 'kBBwwwwwwwwwwBBk', 'kkkkkkkkkkkkkkkk', '................'],
+  display: [
+    '.kkkkkkkkkkkkkk.', '.ksssssssssssgk.', '.kstttttttttsgk.', '.kstcctttyttsgk.', '.ksttttttyyysgk.', '.kstttgttyttsgk.',
+    '.ksttgggttttsgk.', '.kstgggggtttsgk.', '.ksssssssssssgk.', '.kkkkkkkkkkkkkk.', '......kssk......', '....kkkkkkkk....',
+    '...kwssssssgk...', '...kkkkkkkkkk...', '................', '................'],
   trash: [
     '................', '.....kkkkkk.....', '..kkkkkkkkkkkk..', '..kwwwwwwwwwwk..', '..kkkkkkkkkkkk..', '...kswswswswk...',
     '...kswswswswk...', '...kswswswswk...', '...kswswswswk...', '...kswswswswk...', '...kswswswswk...', '...kswswswswk...',

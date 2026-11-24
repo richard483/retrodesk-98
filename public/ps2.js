@@ -6,7 +6,8 @@ import { putFile } from '/store.js';
 import { createVpad } from '/vpad.js';
 const qs = new URLSearchParams(location.search);
 const id = qs.get('id');
-const resume = qs.get('resume') === '1';
+// ?resume=1 continues from the auto-save made when the game was last closed; ?resume=<1-9> from that state slot.
+const resume = ((r) => (r === '1' ? 'auto' : /^[1-9]$|^auto$/.test(r || '') ? r : null))(qs.get('resume'));
 const frame = document.getElementById('emu');
 const statusEl = document.getElementById('status');
 const toastEl = document.getElementById('toast');
@@ -268,7 +269,7 @@ async function main() {
     const s = vm();
     if (s.state === 'running' && !startedAt) { startedAt = Date.now(); post({ type: 'started' }); }
     if (s.state === 'failed' && !startedAt) { clearInterval(timer); }
-    if (!resumed && startedAt && Date.now() - startedAt > 3000 && disc().game?.serial) { resumed = true; loadState('auto'); }
+    if (!resumed && startedAt && Date.now() - startedAt > 3000 && disc().game?.serial) { resumed = true; loadState(resume); }
   }, 500);
   setInterval(() => { if (startedAt) pushCards(); }, 30000);
 }
